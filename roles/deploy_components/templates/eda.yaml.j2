@@ -31,7 +31,14 @@ spec:
   automation_server_url: {{ eda.automation_server_url | default('http://' ~ _name ~ '-controller-service.' ~ _namespace ~ '.svc') }}
   automation_server_ssl_verify: "no"
 
-  database_secret: {{ _name }}-eda-pg
+  # Nested, not a top-level database_secret: the operator reads
+  # database.database_secret, and the top-level name that appears in its
+  # postgres role defaults is the role's own internal variable. Getting this
+  # wrong is silent -- the CRD preserves unknown fields, the operator sees no
+  # external database, and it stands up a managed postgres StatefulSet
+  # alongside the cluster's real one.
+  database:
+    database_secret: {{ _name }}-eda-pg
   # Deliberately not set: ace-db-fields-encryption is the controller's, and its
   # secret_key is that component's Django SECRET_KEY. Left unset, the operator
   # generates ace-eda-db-fields-encryption-secret so EDA gets its own.
