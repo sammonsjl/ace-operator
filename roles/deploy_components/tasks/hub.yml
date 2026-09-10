@@ -3,3 +3,8 @@
   kubernetes.core.k8s:
     state: present
     definition: "{{ lookup('template', 'galaxy.yaml.j2') | from_yaml }}"
+
+- name: Allow the gateway through the hub's default-deny policy
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'netpol.yaml.j2') | from_yaml }}"

@@ -17,7 +17,7 @@ _gw_services: >-
          'address': _name ~ '-controller-service.' ~ _namespace ~ '.svc', 'port': 80, 'order': 1}]
         if controller.enabled | default(true) else [])
    + ([{'name': 'hub', 'slug': 'galaxy', 'path': '/api/galaxy/',
-         'address': _name ~ '-hub-service.' ~ _namespace ~ '.svc', 'port': 80, 'order': 2}]
+         'address': _name ~ '-hub-api-svc.' ~ _namespace ~ '.svc', 'port': 8000, 'order': 2}]
         if hub.enabled | default(true) else [])
    + ([{'name': 'eda', 'slug': 'eda', 'path': '/api/eda/',
          'address': _name ~ '-eda-service.' ~ _namespace ~ '.svc', 'port': 80, 'order': 3}]
