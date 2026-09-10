@@ -1,0 +1,9 @@
+---
+_pg_image: docker.io/library/postgres:15
+# One database per component, matching the containerized track. Sharing one
+# would work until the first restore, when they could not be separated.
+_pg_databases:
+  - {component: gateway, db: gateway}
+  - {component: controller, db: awx}
+  - {component: hub, db: pulp}
+  - {component: eda, db: eda}

@@ -1,5 +1,66 @@
 ---
-# TODO — not yet implemented. See README "Status".
-- name: postgres is not implemented yet
-  ansible.builtin.debug:
-    msg: "postgres: scaffold only"
+# Managed postgres is a convenience for a lab, not a production database. A real
+# deployment points spec.postgres.host at something with backups, and this role
+# does nothing.
+
+- name: Skip the managed database when an external one is configured
+  ansible.builtin.meta: end_role
+  when: not (postgres.managed | default(true))
+
+- name: Create the postgres credentials
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ _name }}-postgres"
+        namespace: "{{ _namespace }}"
+        labels: "{{ _labels }}"
+      stringData:
+        username: postgres
+        password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+  changed_when: false
+  ignore_errors: true
+
+- name: Deploy postgres
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'statefulset.yaml.j2') | from_yaml_all | list }}"
+
+- name: Wait for it to be ready
+  kubernetes.core.k8s_info:
+    kind: StatefulSet
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-postgres"
+  register: _pg
+  retries: 60
+  delay: 5
+  until:
+    - _pg.resources | length > 0
+    - _pg.resources[0].status.readyReplicas | default(0) | int > 0
+
+# Each component operator expects its connection details in a secret of its own
+# naming. Rendering them here is what lets the sub-CRs simply name one.
+- name: Publish a connection secret per component
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ _name }}-{{ item.component }}-pg"
+        namespace: "{{ _namespace }}"
+        labels: "{{ _labels }}"
+      stringData:
+        host: "{{ _name }}-postgres"
+        port: "5432"
+        database: "{{ item.db }}"
+        username: postgres
+        password: "{{ _pg_password }}"
+        sslmode: prefer
+        type: managed
+  loop: "{{ _pg_databases }}"
+  loop_control:
+    label: "{{ item.component }}"
+  no_log: true

@@ -1,0 +1,2 @@
+---
+_redis_image: docker.io/library/redis:7
