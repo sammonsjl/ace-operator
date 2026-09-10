@@ -8,6 +8,11 @@ _controller_image: "{{ controller.image | default(ace_registry ~ '/ace-controlle
 _hub_image: "{{ hub.image | default(ace_registry ~ '/ace-hub:' ~ ace_image_tag) }}"
 _eda_image: "{{ eda.image | default(ace_registry ~ '/ace-eda:' ~ ace_image_tag) }}"
 _ee_image: "{{ ee_image | default(ace_registry ~ '/ace-ee-minimal:' ~ ace_image_tag) }}"
+# awx-operator's control-plane EE container runs `receptor` as its command, so
+# that slot needs an image that actually contains it — ee-minimal does not, and
+# the container dies with "exec: receptor: not found". ace-receptor carries
+# receptor, receptorctl and ansible-runner, which is exactly the shape wanted.
+_receptor_image: "{{ receptor_image | default(ace_registry ~ '/ace-receptor:' ~ ace_image_tag) }}"
 _de_image: "{{ de_image | default(ace_registry ~ '/ace-de-supported:' ~ ace_image_tag) }}"
 
 # Which components this reconcile is responsible for. The gateway issues a
