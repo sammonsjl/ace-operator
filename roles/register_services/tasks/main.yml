@@ -80,12 +80,11 @@
 # settings are built from its secret, which is why deploy_components runs after
 # this role and not before it.
 #
-# CREATE-ONCE, and this one is not a nicety. generate_service_secret mints a
-# NEW secret every time it is called, so calling it each reconcile rewrote the
-# sub-CR's extra_settings, which rolled the component's Deployment, which
-# registered a new instance and left the old one behind. The platform never
-# settled and AWX accumulated dozens of dead instances that the scheduler
-# still handed work to.
+# Issued once PER COMPONENT, not once overall. generate_service_secret mints a
+# new value on every call, so reissuing on each reconcile rewrote the sub-CR,
+# rolled the Deployment and stranded the old AWX instance — but keying "already
+# done" off the Secret merely existing is just as wrong: enabling hub or eda
+# later then never issues theirs, and the assert below fires with no clue why.
 - name: Look for service secrets already issued
   kubernetes.core.k8s_info:
     kind: Secret
@@ -94,19 +93,24 @@
   register: _svc_secret_obj
   no_log: true
 
-- name: Issue a service secret per enabled component
+- name: Work out which components still need one
+  ansible.builtin.set_fact:
+    _have_secrets: >-
+      {{ (_svc_secret_obj.resources[0].data | default({})).keys() | list }}
+  no_log: true
+
+- name: Issue a service secret for each component that lacks one
   kubernetes.core.k8s_exec:
     namespace: "{{ _namespace }}"
     pod: "{{ _gw_pod }}"
     command: "aap-gateway-manage generate_service_secret {{ item.name }}"
-  loop: "{{ _components }}"
+  loop: "{{ _components | rejectattr('name', 'in', _have_secrets) | list }}"
   loop_control:
     label: "{{ item.name }}"
-  register: _service_secrets
-  when: _svc_secret_obj.resources | length == 0
+  register: _new_secrets
   no_log: true
 
-- name: Store them so a later reconcile reuses the same values
+- name: Merge them into the stored set
   kubernetes.core.k8s:
     state: present
     definition:
@@ -116,11 +120,13 @@
         name: "{{ _name }}-service-secrets"
         namespace: "{{ _namespace }}"
         labels: "{{ _labels }}"
-      stringData: >-
-        {{ dict(_components | map(attribute='name')
-                | zip(_service_secrets.results | map(attribute='stdout')
-                      | map('regex_search', '[A-Za-z0-9_-]{40,}') | list)) }}
-  when: _svc_secret_obj.resources | length == 0
+      data: >-
+        {{ (_svc_secret_obj.resources[0].data | default({}))
+           | combine(dict(
+               (_new_secrets.results | default([]) | map(attribute='item') | map(attribute='name') | list)
+               | zip(_new_secrets.results | default([]) | map(attribute='stdout')
+                     | map('regex_search', '[A-Za-z0-9_-]{40,}') | map('b64encode') | list))) }}
+  when: (_new_secrets.results | default([]) | length) > 0
   no_log: true
 
 - name: Read the stored secrets back
@@ -134,10 +140,10 @@
 - name: Keep them for the component roles to inject
   ansible.builtin.set_fact:
     _service_secret_map: >-
-      {{ _svc_secret_final.resources[0].data
-         | dict2items | map(attribute='key') | zip(
-           _svc_secret_final.resources[0].data | dict2items
-           | map(attribute='value') | map('b64decode')) | list | items2dict(key_name=0, value_name=1) }}
+      {{ dict(_svc_secret_final.resources[0].data | dict2items
+              | map(attribute='key') | list
+              | zip(_svc_secret_final.resources[0].data | dict2items
+                    | map(attribute='value') | map('b64decode') | list)) }}
   no_log: true
 
 - name: Fail loudly if a secret is missing
@@ -145,7 +151,7 @@
     that: _service_secret_map[item.name] | default('', true) | length >= 40
     fail_msg: >-
       No service secret for {{ item.name }}. Delete the
-      {{ _name }}-service-secrets Secret to have them reissued.
+      {{ _name }}-service-secrets Secret to have them all reissued.
   loop: "{{ _components }}"
   loop_control:
     label: "{{ item.name }}"
