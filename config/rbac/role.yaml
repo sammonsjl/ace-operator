@@ -1,0 +1,32 @@
+---
+# The operator creates the gateway's own workloads and the sub-CRs the
+# component operators reconcile, and execs into the gateway pod to run its
+# init chain. That exec permission is the unusual one and is why this is not
+# a narrower role.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ace-operator
+rules:
+  - apiGroups: ["automation.ace.io"]
+    resources: ["automationplatforms", "automationplatforms/status", "automationplatforms/finalizers"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps", "services", "persistentvolumeclaims", "serviceaccounts"]
+    verbs: ["*"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods/exec"]
+    verbs: ["create"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["*"]
+  # The sub-CRs. We create and watch them; their own operators reconcile them.
+  - apiGroups: ["awx.ansible.com", "galaxy.ansible.com", "eda.ansible.com"]
+    resources: ["*"]
+    verbs: ["*"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["*"]

@@ -1,0 +1,11 @@
+---
+_envoy_image: docker.io/envoyproxy/envoy:v1.33.5
+
+# The vendor's port map, unchanged. In podman these are separated by being on
+# one host's network; in a pod they are separated the same way, because the
+# gateway and envoy containers share a network namespace and reach each other
+# on 127.0.0.1 exactly as they do there.
+_gw_nginx_port: 8446
+_gw_uwsgi_port: 8052
+_gw_grpc_port: 50051
+_envoy_https_port: 8443

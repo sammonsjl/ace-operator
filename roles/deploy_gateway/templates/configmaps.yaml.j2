@@ -1,0 +1,206 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ _name }}-gateway-config
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+data:
+  settings.py: |
+    # Managed by ace-operator. Layered on top of jewel's own defaults.
+    ALLOWED_HOSTS = ['*']
+    CSRF_TRUSTED_ORIGINS = ['{{ _external_url }}']
+    FRONT_END_URL = '{{ _external_url }}'
+
+    # Envoy pulls its listeners and clusters from this gRPC control plane.
+    # GRPC_SERVER_PORT must be a string: jewel concatenates it into the bind
+    # address rather than formatting it.
+    ENVOY_HOSTNAME = '127.0.0.1'
+    GRPC_SERVER_PORT = '{{ _gw_grpc_port }}'
+    GRPC_SERVER_PROCESSES = 2
+
+  uwsgi.ini: |
+    [uwsgi]
+    ; larger than the 4kB default so fat SSO auth headers fit
+    buffer-size = 10240
+    socket = 127.0.0.1:{{ _gw_uwsgi_port }}
+    processes = 3
+    master = true
+    vacuum = true
+    no-orphans = true
+    lazy-apps = true
+    enable-threads = true
+    manage-script-name = true
+    harakiri = 60
+    harakiri-graceful-timeout = 5
+    harakiri-graceful-signal = 6
+    py-call-osafterfork = true
+    mount = /=aap_gateway_api.wsgi:application
+
+  nginx.conf: |
+    worker_processes 1;
+    pid /var/run/nginx.pid;
+    error_log /dev/stderr;
+    events { worker_connections 1024; }
+    http {
+      include /etc/nginx/mime.types;
+      default_type application/octet-stream;
+      access_log /dev/stdout;
+      sendfile on;
+      client_max_body_size 5m;
+
+      upstream uwsgi { server 127.0.0.1:{{ _gw_uwsgi_port }}; }
+
+      server {
+        listen {{ _gw_nginx_port }};
+        server_name _;
+
+        # Static assets and the console are baked into the image at build time.
+        location ^~ /static/ {
+          alias /var/lib/ansible-automation-platform/platform/ui/static/;
+        }
+
+        location ~* /(v3|api|o|\.well-known)/ {
+          uwsgi_pass uwsgi;
+          uwsgi_read_timeout 120s;
+          include /etc/nginx/uwsgi_params;
+        }
+
+        location ~* \.(json|woff|woff2|jpe?g|png|gif|ico|svg|css|js)$ {
+          root /var/lib/ansible-automation-platform/platform/ui;
+          add_header Cache-Control "public, max-age=31536000, immutable";
+          try_files $uri =404;
+          gzip_static on;
+        }
+
+        location / {
+          root /var/lib/ansible-automation-platform/platform/ui;
+          autoindex off;
+          expires off;
+          add_header Cache-Control "public, max-age=0, must-revalidate" always;
+          try_files $uri /index.html =404;
+        }
+      }
+    }
+
+  supervisord.conf: |
+    # Production process set: nginx, uwsgi, the gRPC control plane, dispatcher.
+    # No auto-reload or runserver — those are jewel development conveniences.
+    [supervisord]
+    umask = 022
+    minfds = 4096
+    nodaemon = true
+    pidfile = /var/run/supervisor/supervisord.pid
+    logfile = /dev/stdout
+    logfile_maxbytes = 0
+    childlogdir = /var/log/supervisor
+
+    [program:nginx]
+    command = nginx -g "daemon off;" -c /etc/ansible-automation-platform/gateway/nginx.conf
+    autorestart = true
+    stopasgroup = true
+    killasgroup = true
+    stdout_logfile = /dev/stdout
+    stdout_logfile_maxbytes = 0
+    stderr_logfile = /dev/stderr
+    stderr_logfile_maxbytes = 0
+
+    [program:uwsgi]
+    command = /opt/aap-gateway/venv/bin/uwsgi /etc/ansible-automation-platform/gateway/uwsgi.ini
+    autorestart = true
+    stopwaitsecs = 5
+    stopsignal = KILL
+    stopasgroup = true
+    killasgroup = true
+    stdout_logfile = /dev/stdout
+    stdout_logfile_maxbytes = 0
+    stderr_logfile = /dev/stderr
+    stderr_logfile_maxbytes = 0
+
+    [program:control-plane]
+    command = /usr/bin/aap-gateway-manage start_grpc_server
+    autorestart = true
+    stopwaitsecs = 5
+    stopsignal = KILL
+    stopasgroup = true
+    killasgroup = true
+    stdout_logfile = /dev/stdout
+    stdout_logfile_maxbytes = 0
+    stderr_logfile = /dev/stderr
+    stderr_logfile_maxbytes = 0
+
+    [program:dispatcher]
+    command = /usr/bin/aap-gateway-manage dispatcherd
+    autorestart = true
+    stopasgroup = true
+    killasgroup = true
+    stdout_logfile = /dev/stdout
+    stdout_logfile_maxbytes = 0
+    stderr_logfile = /dev/stderr
+    stderr_logfile_maxbytes = 0
+
+    [group:gateway-processes]
+    programs = nginx,uwsgi,control-plane,dispatcher
+    priority = 5
+
+    [unix_http_server]
+    file = /var/run/supervisor/supervisor.sock
+
+    [supervisorctl]
+    serverurl = unix:///var/run/supervisor/supervisor.sock
+
+    [rpcinterface:supervisor]
+    supervisor.rpcinterface_factory = supervisor.rpcinterface:make_main_rpcinterface
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ _name }}-envoy-config
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+data:
+  envoy.yaml: |
+    # Envoy holds almost no static routing. Its listeners and clusters are
+    # delivered over xDS by the gateway's gRPC control plane, which serves them
+    # from the service registry — so a route exists because a component
+    # registered itself, not because it was written here.
+    node:
+      cluster: ace
+      id: ace-gateway-proxy
+    dynamic_resources:
+      lds_config:
+        resource_api_version: V3
+        api_config_source:
+          api_type: GRPC
+          transport_api_version: V3
+          grpc_services:
+            - envoy_grpc: {cluster_name: xds_cluster}
+      cds_config:
+        resource_api_version: V3
+        api_config_source:
+          api_type: GRPC
+          transport_api_version: V3
+          grpc_services:
+            - envoy_grpc: {cluster_name: xds_cluster}
+    static_resources:
+      clusters:
+        - name: xds_cluster
+          type: STRICT_DNS
+          connect_timeout: 5s
+          typed_extension_protocol_options:
+            envoy.extensions.upstreams.http.v3.HttpProtocolOptions:
+              "@type": type.googleapis.com/envoy.extensions.upstreams.http.v3.HttpProtocolOptions
+              explicit_http_config:
+                http2_protocol_options: {}
+          load_assignment:
+            cluster_name: xds_cluster
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: {address: 127.0.0.1, port_value: {{ _gw_grpc_port }}}
+    admin:
+      address:
+        socket_address: {address: 127.0.0.1, port_value: 9901}

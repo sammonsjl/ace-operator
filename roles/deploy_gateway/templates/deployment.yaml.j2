@@ -1,0 +1,124 @@
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ _name }}-gateway
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ _name }}-gateway
+  ports:
+    - name: https
+      port: 443
+      targetPort: {{ _envoy_https_port }}
+    - name: gateway
+      port: {{ _gw_nginx_port }}
+      targetPort: {{ _gw_nginx_port }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ _name }}-gateway
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  replicas: {{ gateway.replicas | default(1) }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ _name }}-gateway
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ _name }}-gateway
+        app.kubernetes.io/managed-by: ace-operator
+    spec:
+      # The gateway image runs as uid 1000 / gid 0 and expects group-root
+      # write on its own directories, which is how it stays runnable under an
+      # arbitrary uid.
+      securityContext:
+        runAsUser: 1000
+        fsGroup: 0
+
+      # Migrations run once, in an init container, and the long-running
+      # container then only supervises processes. This is the vendor's own
+      # split, and it is what makes the Deployment safe to restart: nothing in
+      # the main container mutates the schema.
+      initContainers:
+        - name: migrate
+          image: {{ _gateway_image }}
+          imagePullPolicy: {{ image_pull_policy | default('IfNotPresent') }}
+          command: ["aap-gateway-manage", "migrate", "--noinput"]
+          env: &gwenv
+            - name: DJANGO_SETTINGS_MODULE
+              value: aap_gateway_api.settings
+            - name: GATEWAY_SECRET_KEY_FILE
+              value: /run/secrets/gateway_secret_key
+            - name: DATABASE_ENGINE
+              value: django.db.backends.postgresql
+            - name: DATABASE_HOST
+              valueFrom: {secretKeyRef: {name: {{ _name }}-gateway-pg, key: host}}
+            - name: DATABASE_PORT
+              valueFrom: {secretKeyRef: {name: {{ _name }}-gateway-pg, key: port}}
+            - name: DATABASE_NAME
+              valueFrom: {secretKeyRef: {name: {{ _name }}-gateway-pg, key: database}}
+            - name: DATABASE_USER
+              valueFrom: {secretKeyRef: {name: {{ _name }}-gateway-pg, key: username}}
+            - name: DATABASE_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ _name }}-gateway-pg, key: password}}
+            - name: REDIS_MODE
+              value: standalone
+            - name: REDIS_URL
+              value: redis://{{ _name }}-redis:6379/0
+          volumeMounts: &gwmounts
+            - {name: config, mountPath: /etc/ansible-automation-platform/gateway/settings.py, subPath: settings.py}
+            - {name: config, mountPath: /etc/ansible-automation-platform/gateway/uwsgi.ini, subPath: uwsgi.ini}
+            - {name: config, mountPath: /etc/ansible-automation-platform/gateway/nginx.conf, subPath: nginx.conf}
+            - {name: config, mountPath: /etc/supervisord.conf, subPath: supervisord.conf}
+            - {name: secrets, mountPath: /run/secrets, readOnly: true}
+            - {name: run, mountPath: /var/run/supervisor}
+
+      containers:
+        - name: gateway
+          image: {{ _gateway_image }}
+          imagePullPolicy: {{ image_pull_policy | default('IfNotPresent') }}
+          env: *gwenv
+          volumeMounts: *gwmounts
+          ports:
+            - {name: nginx, containerPort: {{ _gw_nginx_port }}}
+            - {name: grpc, containerPort: {{ _gw_grpc_port }}}
+          readinessProbe:
+            httpGet:
+              path: /api/gateway/v1/ping/
+              port: {{ _gw_nginx_port }}
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            failureThreshold: 30
+
+        # Same pod, so envoy reaches the gateway's gRPC control plane and nginx
+        # on 127.0.0.1 — the identical wiring the podman host gets from
+        # network: host, without needing the host's network.
+        - name: envoy
+          image: {{ _envoy_image }}
+          imagePullPolicy: {{ image_pull_policy | default('IfNotPresent') }}
+          args: ["-c", "/etc/envoy/envoy.yaml", "--service-cluster", "ace"]
+          volumeMounts:
+            - {name: envoy-config, mountPath: /etc/envoy}
+          ports:
+            - {name: https, containerPort: {{ _envoy_https_port }}}
+
+      volumes:
+        - name: config
+          configMap: {name: {{ _name }}-gateway-config}
+        - name: envoy-config
+          configMap: {name: {{ _name }}-envoy-config}
+        - name: run
+          emptyDir: {}
+        - name: secrets
+          projected:
+            sources:
+              - secret:
+                  name: {{ _name }}-gateway-secret
+                  items: [{key: secret_key, path: gateway_secret_key}]

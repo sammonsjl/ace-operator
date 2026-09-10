@@ -67,12 +67,27 @@ check worth running after an install:
 kubectl get pods -A -o jsonpath='{..image}' | tr ' ' '\n' | sort -u | grep ace-
 ```
 
+## The gateway pod
+
+The gateway is the only component this operator deploys itself, and its pod is
+two containers: the gateway and **envoy**, sharing a network namespace.
+
+That sharing is the point. On a podman host the two run with `network: host`
+and reach each other on `127.0.0.1`; in a pod they get the identical wiring
+without needing the host's network. Envoy holds almost no static config — its
+listeners and clusters arrive over xDS from the gateway's gRPC control plane,
+so a route exists because a component registered itself, not because it was
+written into a file.
+
+Migrations run in an **init container**, and the long-running container only
+supervises processes. That is the vendor's own split, and it is what makes the
+Deployment safe to restart: nothing in the main container mutates the schema.
+
 ## Status
 
-Early. Implemented: the CRD, the reconcile order, the gateway init chain, and
-sub-CR rendering for all three components.
+Implemented: the CRD, the reconcile order, postgres and redis, the gateway
+(ConfigMaps, Deployment, envoy sidecar, Service), the `aap-gateway-manage` init
+chain, sub-CR rendering for all three components, and `migrate_service_data`.
 
-**Not yet implemented** — `deploy_gateway`, `postgres` and `redis` are
-scaffolds. The gateway Deployment, its envoy sidecar and config, the Service
-and the Ingress are the next piece of work, and nothing installs end to end
-until they exist.
+Not yet done: an Ingress (the Service is reachable, but nothing terminates a
+real hostname), backup/restore kinds, and a molecule suite.

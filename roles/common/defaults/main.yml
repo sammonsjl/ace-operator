@@ -23,3 +23,8 @@ _namespace: "{{ ansible_operator_meta.namespace }}"
 _labels:
   app.kubernetes.io/part-of: "{{ ansible_operator_meta.name }}"
   app.kubernetes.io/managed-by: ace-operator
+
+# Browsers reach the platform here. Every JWT audience, CSRF origin and
+# redirect derives from it, so a wrong value fails at login rather than at
+# deploy.
+_external_url: "{{ gateway.external_url | default('https://' ~ ansible_operator_meta.name ~ '-gateway') }}"
