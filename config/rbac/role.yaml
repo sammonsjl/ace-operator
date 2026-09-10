@@ -30,3 +30,13 @@ rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     verbs: ["*"]
+  # Leader election. Without this the manager cannot take the lock and never
+  # reconciles anything — it starts, reports "Watching resource", and then sits
+  # there, which looks like a broken watch rather than an RBAC problem.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # So reconcile results show up in `kubectl describe`.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
