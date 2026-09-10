@@ -31,8 +31,12 @@ rules:
   - apiGroups: ["awx.ansible.com", "galaxy.ansible.com", "eda.ansible.com"]
     resources: ["*"]
     verbs: ["*"]
+  # networkpolicies as well as ingresses: the hub's operator installs a
+  # default-deny policy, and ACE has to add one of its own to let the gateway
+  # through it. Without this the reconcile dies at that task and every
+  # component after the hub is silently never rendered.
   - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
+    resources: ["ingresses", "networkpolicies"]
     verbs: ["*"]
   # Leader election. Without this the manager cannot take the lock and never
   # reconciles anything — it starts, reports "Watching resource", and then sits
