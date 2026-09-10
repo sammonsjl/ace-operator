@@ -26,14 +26,26 @@ spec:
   admin_user: {{ admin_user | default('admin') }}
   admin_password_secret: {{ _name }}-admin-password
 
-  # The gateway is the issuer; the controller is a resource server. This is
-  # what generate_service_secret in the init chain produced.
+  # The gateway is the issuer; the controller is a resource server. These land
+  # in a settings file as `NAME = value`, so each value has to be a valid
+  # PYTHON literal — quotes around strings, True/False capitalised. A JSON
+  # `false` here breaks the settings ConfigMap render, and awx-operator then
+  # fails at "Apply Resources" without ever creating a Deployment.
+  #
+  # The URL is the in-cluster Service, not spec.gateway.external_url: the
+  # controller fetches the gateway's JWT public key itself, and the external
+  # hostname does not resolve from inside the cluster.
   extra_settings:
+    - setting: ANSIBLE_BASE_JWT_KEY
+      value: "'http://{{ _name }}-gateway.{{ _namespace }}.svc:{{ _gw_nginx_port }}'"
+    - setting: ANSIBLE_BASE_JWT_VALIDATE_CERT
+      value: "False"
     - setting: RESOURCE_SERVER
-      value: >-
-        {"URL": "{{ gateway.external_url | default('https://' ~ _name ~ '-gateway') }}",
-         "SECRET_KEY": "{{ _service_secret_map['controller'] }}",
-         "VALIDATE_HTTPS": false}
+      value: "{'URL': 'http://{{ _name }}-gateway.{{ _namespace }}.svc:{{ _gw_nginx_port }}', 'SECRET_KEY': '{{ _service_secret_map['controller'] }}', 'VALIDATE_HTTPS': False}"
+    # Without this the controller serves its API at / and the gateway's
+    # /api/controller/ route rewrites to a path it does not answer on.
+    - setting: OPTIONAL_API_URLPATTERN_PREFIX
+      value: "'controller'"
     - setting: AWX_CONTAINER_GROUP_DEFAULT_IMAGE
       value: "'{{ _ee_image }}'"
 {% for s in controller.extra_settings | default([]) %}
