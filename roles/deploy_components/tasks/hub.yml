@@ -3,15 +3,3 @@
   kubernetes.core.k8s:
     state: present
     definition: "{{ lookup('template', 'galaxy.yaml.j2') | from_yaml }}"
-
-- name: Wait for the hub API to come up
-  kubernetes.core.k8s_info:
-    kind: Deployment
-    namespace: "{{ _namespace }}"
-    name: "{{ _name }}-hub-api"
-  register: _hub
-  retries: 120
-  delay: 10
-  until:
-    - _hub.resources | length > 0
-    - _hub.resources[0].status.readyReplicas | default(0) | int > 0

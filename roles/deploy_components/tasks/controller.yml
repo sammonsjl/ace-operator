@@ -3,15 +3,3 @@
   kubernetes.core.k8s:
     state: present
     definition: "{{ lookup('template', 'awx.yaml.j2') | from_yaml }}"
-
-- name: Wait for the controller to come up
-  kubernetes.core.k8s_info:
-    kind: Deployment
-    namespace: "{{ _namespace }}"
-    name: "{{ _name }}-controller-task"
-  register: _ctl
-  retries: 120
-  delay: 10
-  until:
-    - _ctl.resources | length > 0
-    - _ctl.resources[0].status.readyReplicas | default(0) | int > 0

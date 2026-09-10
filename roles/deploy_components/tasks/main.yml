@@ -20,3 +20,24 @@
 - name: Deploy EDA
   ansible.builtin.include_tasks: eda.yml
   when: eda.enabled | default(true)
+
+# Waiting happens after every CR exists, not between them. Inline waits meant a
+# component whose operator was slow or missing blocked the ones after it from
+# being created at all.
+- name: Wait for each component to come up
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-{{ item }}"
+  register: _comp
+  retries: 120
+  delay: 10
+  until:
+    - _comp.resources | length > 0
+    - _comp.resources[0].status.readyReplicas | default(0) | int > 0
+  loop: >-
+    {{ (['controller-task'] if controller.enabled | default(true) else [])
+     + (['hub-api'] if hub.enabled | default(true) else [])
+     + (['eda-api'] if eda.enabled | default(true) else []) }}
+  loop_control:
+    label: "{{ item }}"
