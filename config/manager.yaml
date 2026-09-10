@@ -38,7 +38,7 @@ spec:
       serviceAccountName: ace-operator
       containers:
         - name: manager
-          image: ghcr.io/sammonsjl/ace-operator:20260910-8b7a7de
+          image: ghcr.io/sammonsjl/ace-operator:20260910-0bffd83
           imagePullPolicy: Always
           args: ["--leader-elect", "--leader-election-id=ace-operator"]
           env:
