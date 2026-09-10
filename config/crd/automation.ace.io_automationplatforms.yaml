@@ -35,7 +35,12 @@ spec:
                 image_pull_policy:
                   type: string
                   enum: [Always, IfNotPresent, Never]
-                  default: IfNotPresent
+                  # Always, because the default tags float. With IfNotPresent a
+                  # node keeps whatever :latest meant the first time it pulled,
+                  # so a rebuilt image never reaches a running platform and the
+                  # old one keeps failing in exactly the way you just fixed.
+                  # Pin a dated tag and IfNotPresent becomes the better choice.
+                  default: Always
                 admin_user:
                   type: string
                   default: admin
