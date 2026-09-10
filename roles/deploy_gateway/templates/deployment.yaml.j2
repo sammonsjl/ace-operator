@@ -108,6 +108,9 @@ spec:
           args: ["-c", "/etc/envoy/envoy.yaml", "--service-cluster", "ace"]
           volumeMounts:
             - {name: envoy-config, mountPath: /etc/envoy}
+            # The path is not ours to choose: the gateway names it in the
+            # listener it programs over xDS, so envoy must find it there.
+            - {name: tls, mountPath: /etc/ansible-automation-platform/gateway, readOnly: true}
           ports:
             - {name: https, containerPort: {{ _envoy_https_port }}}
 
@@ -116,6 +119,12 @@ spec:
           configMap: {name: {{ _name }}-gateway-config}
         - name: envoy-config
           configMap: {name: {{ _name }}-envoy-config}
+        - name: tls
+          secret:
+            secretName: {{ _name }}-gateway-tls
+            items:
+              - {key: tls.crt, path: gateway.crt}
+              - {key: tls.key, path: gateway.key}
         - name: run
           emptyDir: {}
         - name: secrets

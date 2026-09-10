@@ -44,3 +44,14 @@ _gw_nginx_port: 8446
 _gw_uwsgi_port: 8052
 _gw_grpc_port: 50051
 _envoy_https_port: 8443
+
+# Names the front door is reached by: in-cluster Service forms, and the
+# external hostname if one was given.
+_gw_sans: >-
+  {{ ['DNS:' ~ ansible_operator_meta.name ~ '-gateway',
+      'DNS:' ~ ansible_operator_meta.name ~ '-gateway.' ~ ansible_operator_meta.namespace,
+      'DNS:' ~ ansible_operator_meta.name ~ '-gateway.' ~ ansible_operator_meta.namespace ~ '.svc',
+      'DNS:' ~ ansible_operator_meta.name ~ '-gateway.' ~ ansible_operator_meta.namespace ~ '.svc.cluster.local',
+      'DNS:localhost', 'IP:127.0.0.1']
+     + (['DNS:' ~ (gateway.external_url | default('') | regex_replace('^https?://', '') | regex_replace('/.*$', ''))]
+        if gateway.external_url is defined else []) }}

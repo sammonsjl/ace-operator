@@ -28,6 +28,65 @@
   when: _gw_key_existing.resources | length == 0
   no_log: true
 
+# The gateway's front-door listener is programmed into envoy over xDS and
+# names a certificate. Envoy will not open the listener without it:
+#
+#   Error adding/updating listener(s) port-8443:
+#   Failed to load incomplete private key
+#
+# so every pod looks healthy and nothing answers on 443.
+- name: Look for an existing gateway certificate
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-gateway-tls"
+  register: _tls_existing
+
+- name: Generate a self-signed certificate for the front door
+  when: _tls_existing.resources | length == 0
+  block:
+    - name: Create a private key
+      community.crypto.openssl_privatekey:
+        path: /tmp/gateway.key
+        size: 2048
+
+    - name: Create a signing request
+      community.crypto.openssl_csr:
+        path: /tmp/gateway.csr
+        privatekey_path: /tmp/gateway.key
+        common_name: "{{ _name }}-gateway.{{ _namespace }}.svc"
+        subject_alt_name: "{{ _gw_sans }}"
+
+    - name: Self-sign it
+      community.crypto.x509_certificate:
+        path: /tmp/gateway.crt
+        privatekey_path: /tmp/gateway.key
+        csr_path: /tmp/gateway.csr
+        provider: selfsigned
+        selfsigned_not_after: "+3650d"
+
+    - name: Store it
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ _name }}-gateway-tls"
+            namespace: "{{ _namespace }}"
+            labels: "{{ _labels }}"
+          type: kubernetes.io/tls
+          data:
+            tls.crt: "{{ lookup('file', '/tmp/gateway.crt') | b64encode }}"
+            tls.key: "{{ lookup('file', '/tmp/gateway.key') | b64encode }}"
+      no_log: true
+
+    - name: Remove the temporary files
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: [/tmp/gateway.key, /tmp/gateway.csr, /tmp/gateway.crt]
+
 - name: Read back the secrets the Deployment references
   kubernetes.core.k8s_info:
     kind: Secret
