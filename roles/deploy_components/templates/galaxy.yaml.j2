@@ -14,6 +14,14 @@ spec:
   image_version: {{ _hub_image.split(':')[-1] }}
   image_pull_policy: {{ image_pull_policy | default('IfNotPresent') }}
 
+  # pulp shares an artifact volume across api, content and worker, so this PVC
+  # is ReadWriteMany — which the usual local-path default cannot provision.
+  # Left unset it binds nothing and every hub pod sits Pending with no event on
+  # the pod to say why; the reason is on the PVC.
+  file_storage_storage_class: {{ hub.storage_class | default('nfs-csi') }}
+  file_storage_size: {{ hub.storage_size | default('20Gi') }}
+  file_storage_access_mode: ReadWriteMany
+
   postgres_configuration_secret: {{ _name }}-hub-pg
   admin_password_secret: {{ _name }}-admin-password
   db_fields_encryption_secret: {{ _name }}-db-fields-encryption

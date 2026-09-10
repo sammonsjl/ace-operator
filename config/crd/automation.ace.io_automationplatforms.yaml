@@ -71,6 +71,13 @@ spec:
                     enabled: {type: boolean, default: true}
                     image: {type: string}
                     replicas: {type: integer, default: 1}
+                    storage_class:
+                      type: string
+                      description: >-
+                        Must support ReadWriteMany: pulp shares one artifact
+                        volume across api, content and worker.
+                      default: nfs-csi
+                    storage_size: {type: string, default: 20Gi}
                 eda:
                   type: object
                   properties:
