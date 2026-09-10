@@ -1,5 +1,13 @@
 ---
-- name: Create the postgres credentials
+- name: Look for existing postgres credentials
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-postgres"
+  register: _pg_existing
+  no_log: true
+
+- name: Create the postgres credentials, only if they do not exist yet
   kubernetes.core.k8s:
     state: present
     definition:
@@ -12,8 +20,24 @@
       stringData:
         username: postgres
         password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
-  changed_when: false
-  ignore_errors: true
+  when: _pg_existing.resources | length == 0
+  no_log: true
+
+# The password lives in the Secret, and the lookup that created it is not a
+# variable. Read it back, so a re-reconcile publishes the SAME password rather
+# than generating a new one and locking every component out of the database.
+- name: Read the postgres password back
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-postgres"
+  register: _pg_secret
+  no_log: true
+
+- name: Keep it for the connection secrets below
+  ansible.builtin.set_fact:
+    _pg_password: "{{ _pg_secret.resources[0].data.password | b64decode }}"
+  no_log: true
 
 - name: Deploy postgres
   kubernetes.core.k8s:

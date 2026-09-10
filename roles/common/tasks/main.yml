@@ -1,9 +1,25 @@
 ---
-# Preparation only. Everything the gateway needs must be resolved before its
-# Deployment is created, because step 2 of the init chain runs inside a pod
-# that has to already be up.
+# Preparation only. Everything the gateway needs must exist before its
+# Deployment is created, because the init chain runs inside a pod that has to
+# already be up.
+#
+# Every secret here is CREATE-ONCE. `state: present` with a generating lookup
+# would mint a new value on every reconcile — rotating the admin password and
+# the Django secret key underneath a running platform, which reads as a
+# mysterious login failure rather than as a bug in this file.
 
-- name: Generate the admin password if the user did not supply one
+- name: Look for the secrets that must survive a reconcile
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ _namespace }}"
+    name: "{{ item }}"
+  register: _existing
+  loop:
+    - "{{ admin_password_secret | default(_name ~ '-admin-password') }}"
+    - "{{ _name }}-db-fields-encryption"
+  no_log: true
+
+- name: Generate the admin password, only if it does not exist yet
   kubernetes.core.k8s:
     state: present
     definition:
@@ -15,13 +31,10 @@
         labels: "{{ _labels }}"
       stringData:
         password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
-  when: admin_password_secret is not defined
-  # A regenerated password would lock the platform out of itself on every
-  # reconcile, so this is create-once.
-  changed_when: false
-  ignore_errors: true
+  when: _existing.results[0].resources | length == 0
+  no_log: true
 
-- name: Create the database field-encryption key
+- name: Create the database field-encryption key, only if it does not exist yet
   kubernetes.core.k8s:
     state: present
     definition:
@@ -33,5 +46,18 @@
         labels: "{{ _labels }}"
       stringData:
         secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
-  changed_when: false
-  ignore_errors: true
+  when: _existing.results[1].resources | length == 0
+  no_log: true
+
+- name: Read the admin password back
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ _namespace }}"
+    name: "{{ admin_password_secret | default(_name ~ '-admin-password') }}"
+  register: _admin_secret
+  no_log: true
+
+- name: Keep it for the gateway init chain
+  ansible.builtin.set_fact:
+    _admin_password: "{{ _admin_secret.resources[0].data.password | b64decode }}"
+  no_log: true

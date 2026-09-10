@@ -3,7 +3,17 @@
 # sub-CRs handed to their own operators. It has to be first-class here because
 # nothing else can start until it has issued their service secrets.
 
-- name: Create the gateway secret key
+- name: Look for an existing gateway secret key
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-gateway-secret"
+  register: _gw_key_existing
+  no_log: true
+
+# Rotating this would invalidate every session and every signed value the
+# platform has produced.
+- name: Create the gateway secret key, only if it does not exist yet
   kubernetes.core.k8s:
     state: present
     definition:
@@ -15,8 +25,8 @@
         labels: "{{ _labels }}"
       stringData:
         secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
-  changed_when: false
-  ignore_errors: true
+  when: _gw_key_existing.resources | length == 0
+  no_log: true
 
 - name: Read back the secrets the Deployment references
   kubernetes.core.k8s_info:
