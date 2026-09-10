@@ -1,5 +1,9 @@
 ---
-_gw_api: "http://{{ _name }}-gateway:{{ _gw_nginx_port }}/api/gateway/v1"
+# Namespace-qualified: the operator runs in ace-system and the gateway Service
+# lives in the platform's own namespace, so a bare Service name does not
+# resolve — it fails as "Name or service not known", which looks like the
+# gateway is down rather than like a DNS scope problem.
+_gw_api: "http://{{ _name }}-gateway.{{ _namespace }}.svc:{{ _gw_nginx_port }}/api/gateway/v1"
 
 # Envoy matches a service's public path and rewrites it to service_path, and
 # routes are first-match by `order` — so the gateway's "/" catch-all has to be
@@ -10,13 +14,13 @@ _gw_api: "http://{{ _name }}-gateway:{{ _gw_nginx_port }}/api/gateway/v1"
 # the port is the Service port rather than the vendor's host port map.
 _gw_services: >-
   {{ ([{'name': 'controller', 'slug': 'controller', 'path': '/api/controller/',
-         'address': _name ~ '-controller-service', 'port': 80, 'order': 1}]
+         'address': _name ~ '-controller-service.' ~ _namespace ~ '.svc', 'port': 80, 'order': 1}]
         if controller.enabled | default(true) else [])
    + ([{'name': 'hub', 'slug': 'galaxy', 'path': '/api/galaxy/',
-         'address': _name ~ '-hub-service', 'port': 80, 'order': 2}]
+         'address': _name ~ '-hub-service.' ~ _namespace ~ '.svc', 'port': 80, 'order': 2}]
         if hub.enabled | default(true) else [])
    + ([{'name': 'eda', 'slug': 'eda', 'path': '/api/eda/',
-         'address': _name ~ '-eda-service', 'port': 80, 'order': 3}]
+         'address': _name ~ '-eda-service.' ~ _namespace ~ '.svc', 'port': 80, 'order': 3}]
         if eda.enabled | default(true) else [])
    + [{'name': 'gateway', 'slug': 'gateway', 'path': '/',
-        'address': _name ~ '-gateway', 'port': _gw_nginx_port, 'order': 100}] }}
+        'address': _name ~ '-gateway.' ~ _namespace ~ '.svc', 'port': _gw_nginx_port, 'order': 100}] }}
