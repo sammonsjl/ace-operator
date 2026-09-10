@@ -90,9 +90,28 @@
   register: _service_secrets
   no_log: true
 
+# stdout is two lines, not one: aap-gateway-manage prints
+#
+#     Failed library import, colors won't be in logs: No module named 'colorama'
+#     3Zmkqq3bfK78KHv6czfq...
+#
+# so trimming the whole thing keeps the warning as part of the value, and the
+# resulting multi-line string breaks the YAML of every sub-CR that embeds it.
+# The secret is the only unbroken run of base64url characters in there.
 - name: Keep them for the component roles to inject
   ansible.builtin.set_fact:
     _service_secret_map: >-
       {{ dict(_components | map(attribute='name')
-              | zip(_service_secrets.results | map(attribute='stdout') | map('trim'))) }}
+              | zip(_service_secrets.results | map(attribute='stdout')
+                    | map('regex_search', '[A-Za-z0-9_-]{40,}') | list)) }}
   no_log: true
+
+- name: Fail loudly if a secret could not be extracted
+  ansible.builtin.assert:
+    that: _service_secret_map[item.name] | default('', true) | length >= 40
+    fail_msg: >-
+      No service secret parsed for {{ item.name }}. generate_service_secret
+      probably changed its output format.
+  loop: "{{ _components }}"
+  loop_control:
+    label: "{{ item.name }}"
