@@ -101,7 +101,10 @@
         username: postgres
         password: "{{ _pg_password }}"
         sslmode: prefer
-        type: managed
+        # "unmanaged" from the component operator's point of view: this
+        # database is managed by ACE, so awx-operator must connect to it rather
+        # than stand up a second postgres of its own beside it.
+        type: unmanaged
   loop: "{{ _pg_databases }}"
   loop_control:
     label: "{{ item.component }}"
