@@ -1,0 +1,17 @@
+---
+- name: Deploy redis
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'deployment.yaml.j2') | from_yaml_all | list }}"
+
+- name: Wait for it to be ready
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-redis"
+  register: _redis
+  retries: 60
+  delay: 5
+  until:
+    - _redis.resources | length > 0
+    - _redis.resources[0].status.readyReplicas | default(0) | int > 0
