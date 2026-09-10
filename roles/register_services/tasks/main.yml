@@ -103,7 +103,7 @@
   kubernetes.core.k8s_exec:
     namespace: "{{ _namespace }}"
     pod: "{{ _gw_pod }}"
-    command: "aap-gateway-manage generate_service_secret {{ item.name }}"
+    command: "aap-gateway-manage generate_service_secret {{ item.slug }}"
   loop: "{{ _components | rejectattr('name', 'in', _have_secrets) | list }}"
   loop_control:
     label: "{{ item.name }}"

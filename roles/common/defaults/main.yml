@@ -18,10 +18,14 @@ _de_image: "{{ de_image | default(ace_registry ~ '/ace-de-supported:' ~ ace_imag
 # Which components this reconcile is responsible for. The gateway issues a
 # service secret per entry, so this list gates both deployment and the init
 # chain — they must not drift apart.
+# slug is what the GATEWAY calls the service, and it is not always the
+# component's name: the hub is registered as "galaxy", so
+# `generate_service_secret hub` is rejected with
+# "invalid choice: 'hub' (choose from controller, galaxy, eda)".
 _components: >-
-  {{ ([{'name': 'controller', 'kind': 'AWX'}] if controller.enabled | default(true) else [])
-   + ([{'name': 'hub',        'kind': 'Galaxy'}] if hub.enabled | default(true) else [])
-   + ([{'name': 'eda',        'kind': 'EDA'}] if eda.enabled | default(true) else []) }}
+  {{ ([{'name': 'controller', 'slug': 'controller', 'kind': 'AWX'}] if controller.enabled | default(true) else [])
+   + ([{'name': 'hub',        'slug': 'galaxy',     'kind': 'Galaxy'}] if hub.enabled | default(true) else [])
+   + ([{'name': 'eda',        'slug': 'eda',        'kind': 'EDA'}] if eda.enabled | default(true) else []) }}
 
 _name: "{{ ansible_operator_meta.name }}"
 _namespace: "{{ ansible_operator_meta.namespace }}"
