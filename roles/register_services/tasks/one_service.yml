@@ -135,3 +135,25 @@
     status_code: 201
   when: _service_q.json.count == 0
   no_log: true
+
+# Registration is create-once, but the shape of a component's Service can
+# change between releases of its operator — hub moved from :80 to :8000 when it
+# gained its own api Service. Left alone, envoy keeps dialling the old port and
+# every request through the gateway is a 503 while the component is healthy on
+# its own Service.
+- name: "Keep the {{ _svc.name }} service pointing where the component actually is"
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/services/{{ _service_q.json.results[0].id }}/"
+    method: PATCH
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      service_port: "{{ _svc.port | int }}"
+      service_path: "{{ _svc.path }}"
+    status_code: [200, 202]
+  when: _service_q.json.count > 0
+  changed_when: true
+  no_log: true
