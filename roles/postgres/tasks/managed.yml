@@ -56,6 +56,29 @@
     - _pg.resources | length > 0
     - _pg.resources[0].status.readyReplicas | default(0) | int > 0
 
+# The container's own entrypoint only creates POSTGRES_DB, and only on a first
+# init of an empty data directory — so per-component databases have to be
+# created here, not through initdb scripts that would never run again.
+#
+# CREATE DATABASE has no IF NOT EXISTS, hence the \gexec form: the SELECT
+# produces the statement only when the database is missing, so this is safe to
+# repeat on every reconcile.
+- name: Create a database per component
+  kubernetes.core.k8s_exec:
+    namespace: "{{ _namespace }}"
+    pod: "{{ _name }}-postgres-0"
+    command: >-
+      psql -U postgres -v ON_ERROR_STOP=1 -tAc
+      "SELECT 'CREATE DATABASE \"{{ item.db }}\"'
+       WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '{{ item.db }}')\gexec"
+  loop: "{{ _pg_databases }}"
+  loop_control:
+    label: "{{ item.db }}"
+  register: _createdb
+  retries: 10
+  delay: 6
+  until: _createdb is succeeded
+
 # Each component operator expects its connection details in a secret of its own
 # naming. Rendering them here is what lets the sub-CRs simply name one.
 - name: Publish a connection secret per component
