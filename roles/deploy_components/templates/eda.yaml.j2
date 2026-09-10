@@ -37,6 +37,13 @@ spec:
   # wrong is silent -- the CRD preserves unknown fields, the operator sees no
   # external database, and it stands up a managed postgres StatefulSet
   # alongside the cluster's real one.
+  # eda.configmap.yaml.j2 references public_base_url with a bare truthiness
+  # test rather than `is defined`, and nothing in the operator ever sets it,
+  # so leaving it out fails the reconcile at "Apply ConfigMap resources"
+  # with an undefined-variable error. It is the platform's public URL --
+  # what EDA hands out as the base for webhooks and event streams.
+  public_base_url: {{ gateway.external_url | default('https://' ~ _name ~ '-gateway') }}
+
   database:
     database_secret: {{ _name }}-eda-pg
   # Deliberately not set: ace-db-fields-encryption is the controller's, and its
