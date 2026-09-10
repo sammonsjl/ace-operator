@@ -1,0 +1,5 @@
+---
+# TODO — not yet implemented. See README "Status".
+- name: postgres is not implemented yet
+  ansible.builtin.debug:
+    msg: "postgres: scaffold only"

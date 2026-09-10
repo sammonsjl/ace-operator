@@ -1,0 +1,35 @@
+---
+# Vendor renders AutomationHub; we render Galaxy, the upstream kind served by
+# galaxy-operator. That operator is GPLv2+ — creating its CRs is ordinary API
+# use and carries no licence obligation on this repo.
+apiVersion: galaxy.ansible.com/v1beta1
+kind: Galaxy
+metadata:
+  name: {{ _name }}-hub
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  image: {{ _hub_image.split(':')[0] }}
+  image_version: {{ _hub_image.split(':')[-1] }}
+  image_pull_policy: {{ image_pull_policy | default('IfNotPresent') }}
+
+  postgres_configuration_secret: {{ _name }}-hub-pg
+  admin_password_secret: {{ _name }}-admin-password
+  db_fields_encryption_secret: {{ _name }}-db-fields-encryption
+
+  api:
+    replicas: {{ hub.replicas | default(1) }}
+  content:
+    replicas: {{ hub.replicas | default(1) }}
+  worker:
+    replicas: {{ hub.replicas | default(1) }}
+
+  # ace-hub forces django-ansible-base to the ref the gateway builds against,
+  # so the JWT dialect matches. Nothing to configure here — but if hub starts
+  # rejecting gateway tokens with a missing-claim error, that pin is the place
+  # to look, not this CR.
+  resource_server:
+    url: {{ gateway.external_url | default('https://' ~ _name ~ '-gateway') }}
+    secret_key_secret: {{ _name }}-hub-service-secret
+    validate_https: false

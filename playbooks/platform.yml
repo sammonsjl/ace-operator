@@ -1,0 +1,13 @@
+---
+- name: Reconcile an AutomationPlatform
+  hosts: localhost
+  gather_facts: false
+  connection: local
+  roles:
+    - role: common
+    - role: redis
+    - role: postgres
+    - role: deploy_gateway
+    - role: initialize_gateway
+    - role: deploy_components
+    - role: post_install

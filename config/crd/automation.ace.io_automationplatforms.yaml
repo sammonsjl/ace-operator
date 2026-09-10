@@ -1,0 +1,106 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: automationplatforms.automation.ace.io
+spec:
+  group: automation.ace.io
+  names:
+    kind: AutomationPlatform
+    listKind: AutomationPlatformList
+    plural: automationplatforms
+    singular: automationplatform
+    shortNames: [aceplatform, acep]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Status
+          type: string
+          jsonPath: .status.phase
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                image_pull_policy:
+                  type: string
+                  enum: [Always, IfNotPresent, Never]
+                  default: IfNotPresent
+                admin_user:
+                  type: string
+                  default: admin
+                admin_password_secret:
+                  type: string
+                  description: >-
+                    Secret holding the admin password. Generated if unset.
+
+                # Each component is enabled independently. Disabled components
+                # are never rendered, and the gateway is never asked to issue
+                # them a service secret.
+                controller:
+                  type: object
+                  properties:
+                    enabled: {type: boolean, default: true}
+                    image: {type: string}
+                    replicas: {type: integer, default: 1}
+                    extra_settings:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          setting: {type: string}
+                          value: {type: string}
+                hub:
+                  type: object
+                  properties:
+                    enabled: {type: boolean, default: true}
+                    image: {type: string}
+                    replicas: {type: integer, default: 1}
+                eda:
+                  type: object
+                  properties:
+                    enabled: {type: boolean, default: true}
+                    image: {type: string}
+                    replicas: {type: integer, default: 1}
+
+                gateway:
+                  type: object
+                  properties:
+                    image: {type: string}
+                    replicas: {type: integer, default: 1}
+                    external_url:
+                      type: string
+                      description: >-
+                        URL browsers reach the platform on. Every component's
+                        JWT audience and redirect config derives from it.
+                ee_image:
+                  type: string
+                  description: Execution environment jobs run in.
+                de_image:
+                  type: string
+                  description: Decision environment EDA rulebooks run in.
+
+                postgres:
+                  type: object
+                  properties:
+                    managed: {type: boolean, default: true}
+                    host: {type: string}
+                    port: {type: integer, default: 5432}
+                    storage_size: {type: string, default: 20Gi}
+                redis:
+                  type: object
+                  properties:
+                    managed: {type: boolean, default: true}
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true

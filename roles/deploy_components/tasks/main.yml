@@ -1,0 +1,22 @@
+---
+# Render one CR per enabled component and let that component's own operator
+# reconcile it. This is the shape the vendor's operator uses, and the reason
+# ace-operator stays small: awx-operator is the largest and most battle-tested
+# piece of this stack, and forking it would be the wrong trade.
+#
+# Requires these operators installed in the cluster:
+#   awx-operator (Apache-2.0), eda-server-operator, galaxy-operator (GPLv2+).
+# We create their custom resources — ordinary API use. We copy none of their
+# code, which for the GPLv2+ ones would conflict with this repo's Apache-2.0.
+
+- name: Deploy the controller
+  ansible.builtin.include_tasks: controller.yml
+  when: controller.enabled | default(true)
+
+- name: Deploy the hub
+  ansible.builtin.include_tasks: hub.yml
+  when: hub.enabled | default(true)
+
+- name: Deploy EDA
+  ansible.builtin.include_tasks: eda.yml
+  when: eda.enabled | default(true)

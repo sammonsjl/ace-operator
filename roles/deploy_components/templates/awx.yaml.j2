@@ -1,0 +1,42 @@
+---
+# The vendor renders AutomationController here, served by its downstream
+# operator. We render AWX — the upstream kind, served by awx-operator — which
+# is exactly what lets a public operator do the work.
+apiVersion: awx.ansible.com/v1beta1
+kind: AWX
+metadata:
+  name: {{ _name }}-controller
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  image: {{ _controller_image.split(':')[0] }}
+  image_version: {{ _controller_image.split(':')[-1] }}
+  image_pull_policy: {{ image_pull_policy | default('IfNotPresent') }}
+  replicas: {{ controller.replicas | default(1) }}
+
+  # Our execution environment, not awx-operator's upstream default. Without
+  # these three the operator would quietly deploy someone else's images.
+  control_plane_ee_image: {{ _ee_image }}
+  ee_images:
+    - name: ACE EE (latest)
+      image: {{ _ee_image }}
+
+  postgres_configuration_secret: {{ _name }}-controller-pg
+  admin_user: {{ admin_user | default('admin') }}
+  admin_password_secret: {{ _name }}-admin-password
+
+  # The gateway is the issuer; the controller is a resource server. This is
+  # what generate_service_secret in the init chain produced.
+  extra_settings:
+    - setting: RESOURCE_SERVER
+      value: >-
+        {"URL": "{{ gateway.external_url | default('https://' ~ _name ~ '-gateway') }}",
+         "SECRET_KEY": "{{ _service_secret_map['controller'] }}",
+         "VALIDATE_HTTPS": false}
+    - setting: AWX_CONTAINER_GROUP_DEFAULT_IMAGE
+      value: "'{{ _ee_image }}'"
+{% for s in controller.extra_settings | default([]) %}
+    - setting: {{ s.setting }}
+      value: {{ s.value }}
+{% endfor %}

@@ -1,0 +1,25 @@
+---
+ace_registry: ghcr.io/sammonsjl
+ace_image_tag: latest
+
+# Resolved image references. A spec field wins; otherwise the registry default.
+_gateway_image: "{{ gateway.image | default(ace_registry ~ '/ace-gateway:' ~ ace_image_tag) }}"
+_controller_image: "{{ controller.image | default(ace_registry ~ '/ace-controller:' ~ ace_image_tag) }}"
+_hub_image: "{{ hub.image | default(ace_registry ~ '/ace-hub:' ~ ace_image_tag) }}"
+_eda_image: "{{ eda.image | default(ace_registry ~ '/ace-eda:' ~ ace_image_tag) }}"
+_ee_image: "{{ ee_image | default(ace_registry ~ '/ace-ee-minimal:' ~ ace_image_tag) }}"
+_de_image: "{{ de_image | default(ace_registry ~ '/ace-de-supported:' ~ ace_image_tag) }}"
+
+# Which components this reconcile is responsible for. The gateway issues a
+# service secret per entry, so this list gates both deployment and the init
+# chain — they must not drift apart.
+_components: >-
+  {{ ([{'name': 'controller', 'kind': 'AWX'}] if controller.enabled | default(true) else [])
+   + ([{'name': 'hub',        'kind': 'Galaxy'}] if hub.enabled | default(true) else [])
+   + ([{'name': 'eda',        'kind': 'EDA'}] if eda.enabled | default(true) else []) }}
+
+_name: "{{ ansible_operator_meta.name }}"
+_namespace: "{{ ansible_operator_meta.namespace }}"
+_labels:
+  app.kubernetes.io/part-of: "{{ ansible_operator_meta.name }}"
+  app.kubernetes.io/managed-by: ace-operator

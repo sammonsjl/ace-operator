@@ -1,0 +1,37 @@
+---
+# Preparation only. Everything the gateway needs must be resolved before its
+# Deployment is created, because step 2 of the init chain runs inside a pod
+# that has to already be up.
+
+- name: Generate the admin password if the user did not supply one
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ _name }}-admin-password"
+        namespace: "{{ _namespace }}"
+        labels: "{{ _labels }}"
+      stringData:
+        password: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+  when: admin_password_secret is not defined
+  # A regenerated password would lock the platform out of itself on every
+  # reconcile, so this is create-once.
+  changed_when: false
+  ignore_errors: true
+
+- name: Create the database field-encryption key
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ _name }}-db-fields-encryption"
+        namespace: "{{ _namespace }}"
+        labels: "{{ _labels }}"
+      stringData:
+        secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
+  changed_when: false
+  ignore_errors: true

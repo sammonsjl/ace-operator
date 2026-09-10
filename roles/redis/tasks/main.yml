@@ -1,0 +1,5 @@
+---
+# TODO — not yet implemented. See README "Status".
+- name: redis is not implemented yet
+  ansible.builtin.debug:
+    msg: "redis: scaffold only"

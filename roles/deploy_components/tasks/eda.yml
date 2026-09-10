@@ -1,0 +1,17 @@
+---
+- name: Render the EDA CR
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'eda.yaml.j2') | from_yaml }}"
+
+- name: Wait for the EDA API to come up
+  kubernetes.core.k8s_info:
+    kind: Deployment
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-eda-api"
+  register: _eda
+  retries: 120
+  delay: 10
+  until:
+    - _eda.resources | length > 0
+    - _eda.resources[0].status.readyReplicas | default(0) | int > 0

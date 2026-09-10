@@ -1,0 +1,5 @@
+bin/
+bundle/
+testbin/
+*.tar
+.DS_Store

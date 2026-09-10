@@ -1,0 +1,30 @@
+---
+# EDA is the one kind whose name is the same upstream and downstream, so this
+# template is the closest of the three to the vendor's own.
+apiVersion: eda.ansible.com/v1alpha1
+kind: EDA
+metadata:
+  name: {{ _name }}-eda
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  image: {{ _eda_image.split(':')[0] }}
+  image_version: {{ _eda_image.split(':')[-1] }}
+  image_pull_policy: {{ image_pull_policy | default('IfNotPresent') }}
+  replicas: {{ eda.replicas | default(1) }}
+
+  # The decision environment rulebooks run in.
+  default_decision_environment: {{ _de_image }}
+
+  postgres_configuration_secret: {{ _name }}-eda-pg
+  admin_password_secret: {{ _name }}-admin-password
+
+  resource_server:
+    url: {{ gateway.external_url | default('https://' ~ _name ~ '-gateway') }}
+    secret_key_secret: {{ _name }}-eda-service-secret
+    validate_https: false
+
+  # EDA reaches Redis over TCP rather than a socket — the only component that
+  # does, on the containerized track as well.
+  redis_host: {{ _name }}-redis

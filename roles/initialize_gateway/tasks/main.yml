@@ -1,0 +1,108 @@
+---
+# Runs inside the live gateway pod. Order here is load-bearing: the service
+# secrets generated at the end are what every component's RESOURCE_SERVER
+# settings are built from, so this must complete before deploy_components
+# renders a single sub-CR. Reversing the two is the classic cause of
+# JWT-handshake failures between the gateway and its components.
+
+- name: Find a running gateway pod
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: "{{ _namespace }}"
+    label_selectors:
+      - "app.kubernetes.io/name={{ _name }}-gateway"
+      - "app.kubernetes.io/managed-by=ace-operator"
+    field_selectors:
+      - status.phase=Running
+  register: _gw_pods
+  retries: 60
+  delay: 5
+  until: _gw_pods.resources | length > 0
+
+- name: Name it
+  ansible.builtin.set_fact:
+    _gw_pod: "{{ _gw_pods.resources[0].metadata.name }}"
+
+- name: Migrate the gateway database
+  kubernetes.core.k8s_exec:
+    namespace: "{{ _namespace }}"
+    pod: "{{ _gw_pod }}"
+    command: aap-gateway-manage migrate --noinput
+
+- name: Create the admin user
+  kubernetes.core.k8s_exec:
+    namespace: "{{ _namespace }}"
+    pod: "{{ _gw_pod }}"
+    command: >-
+      bash -c "aap-gateway-manage createsuperuser --username={{ admin_user | default('admin') }}
+      --email=admin@example.com --noinput || true"
+
+- name: Set the admin password
+  kubernetes.core.k8s_exec:
+    namespace: "{{ _namespace }}"
+    pod: "{{ _gw_pod }}"
+    command: >-
+      aap-gateway-manage update_password
+      --username={{ admin_user | default('admin') }}
+      --password={{ _admin_password }}
+  no_log: true
+
+- name: Initialize the authenticators
+  kubernetes.core.k8s_exec:
+    namespace: "{{ _namespace }}"
+    pod: "{{ _gw_pod }}"
+    command: aap-gateway-manage authenticators --initialize
+
+# The operator gets its own identity rather than borrowing admin's, so its
+# API calls are attributable and revocable independently.
+- name: Look for an existing operator token
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-operator-token"
+  register: _token_secret
+
+- name: Mint an operator OAuth2 token
+  kubernetes.core.k8s_exec:
+    namespace: "{{ _namespace }}"
+    pod: "{{ _gw_pod }}"
+    command: >-
+      bash -c "aap-gateway-manage create_oauth2_token --user={{ admin_user | default('admin') }}"
+  register: _new_token
+  when: _token_secret.resources | length == 0
+  no_log: true
+
+- name: Persist it
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ _name }}-operator-token"
+        namespace: "{{ _namespace }}"
+        labels: "{{ _labels }}"
+      stringData:
+        token: "{{ _new_token.stdout | trim }}"
+  when: _token_secret.resources | length == 0
+  no_log: true
+
+# The step everything else waits on.
+- name: Generate a service secret per enabled component
+  kubernetes.core.k8s_exec:
+    namespace: "{{ _namespace }}"
+    pod: "{{ _gw_pod }}"
+    command: >-
+      bash -c "aap-gateway-manage generate_service_secret {{ item.name }}"
+  loop: "{{ _components }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: _service_secrets
+  no_log: true
+
+- name: Keep them for the component roles to inject
+  ansible.builtin.set_fact:
+    _service_secret_map: >-
+      {{ dict(_components | map(attribute='name')
+              | zip(_service_secrets.results | map(attribute='stdout') | map('trim'))) }}
+  no_log: true

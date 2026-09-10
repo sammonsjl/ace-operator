@@ -1,0 +1,5 @@
+---
+# TODO — not yet implemented. See README "Status".
+- name: deploy_gateway is not implemented yet
+  ansible.builtin.debug:
+    msg: "deploy_gateway: scaffold only"

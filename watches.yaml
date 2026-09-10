@@ -1,0 +1,9 @@
+---
+# One kind, one playbook. The vendor's operator additionally watches Backup and
+# Restore kinds; those are out of scope for v1 but are peers, not afterthoughts,
+# so the group is versioned to leave room for them.
+- version: v1alpha1
+  group: automation.ace.io
+  kind: AutomationPlatform
+  playbook: playbooks/platform.yml
+  snakeCaseParameters: false

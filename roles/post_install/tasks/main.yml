@@ -1,0 +1,51 @@
+---
+# Runs once every enabled component is up. migrate_service_data is what turns
+# three independently deployed services into one platform: it merges their
+# organizations, teams and users into the gateway's own records. Running it
+# before the components are ready merges nothing and reports success, which is
+# why deploy_components waits on readiness rather than firing and forgetting.
+
+- name: Find the gateway pod again
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: "{{ _namespace }}"
+    label_selectors:
+      - "app.kubernetes.io/name={{ _name }}-gateway"
+    field_selectors:
+      - status.phase=Running
+  register: _gw_pods
+
+- name: Merge service data into the platform
+  kubernetes.core.k8s_exec:
+    namespace: "{{ _namespace }}"
+    pod: "{{ _gw_pods.resources[0].metadata.name }}"
+    command: >-
+      aap-gateway-manage migrate_service_data
+      --username={{ admin_user | default('admin') }}
+  when:
+    - _gw_pods.resources | length > 0
+    - _components | length > 0
+  register: _merge
+  # The merge can take minutes on a platform with real content, and it is
+  # idempotent, so a retry on a slow first run is cheaper than a failed
+  # reconcile that leaves the console half-populated.
+  retries: 3
+  delay: 30
+  until: _merge is succeeded
+
+- name: Report what was reconciled
+  operator_sdk.util.k8s_status:
+    api_version: automation.ace.io/v1alpha1
+    kind: AutomationPlatform
+    name: "{{ _name }}"
+    namespace: "{{ _namespace }}"
+    status:
+      phase: Ready
+      components: "{{ _components | map(attribute='name') | list }}"
+      images:
+        gateway: "{{ _gateway_image }}"
+        controller: "{{ _controller_image }}"
+        hub: "{{ _hub_image }}"
+        eda: "{{ _eda_image }}"
+        ee: "{{ _ee_image }}"
+        de: "{{ _de_image }}"
