@@ -20,7 +20,7 @@ _gw_services: >-
          'address': _name ~ '-hub-api-svc.' ~ _namespace ~ '.svc', 'port': 8000, 'order': 2}]
         if hub.enabled | default(true) else [])
    + ([{'name': 'eda', 'slug': 'eda', 'path': '/api/eda/',
-         'address': _name ~ '-eda-service.' ~ _namespace ~ '.svc', 'port': 80, 'order': 3}]
+         'address': _name ~ '-eda-api.' ~ _namespace ~ '.svc', 'port': 8000, 'order': 3}]
         if eda.enabled | default(true) else [])
    + [{'name': 'gateway', 'slug': 'gateway', 'path': '/',
         'address': _name ~ '-gateway.' ~ _namespace ~ '.svc', 'port': _gw_nginx_port, 'order': 100}] }}
