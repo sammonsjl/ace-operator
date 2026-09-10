@@ -24,7 +24,11 @@ spec:
   # The control-plane EE and the job EE are different images on purpose: this
   # slot's container is started with `receptor` as its command, while ee_images
   # is what jobs actually run in.
-  control_plane_ee_image: {{ _receptor_image }}
+  # ee-minimal, not ace-receptor: awx-operator uses this image both for the
+  # sidecar it runs receptor in AND as the control-plane EE that project
+  # updates execute in, so it needs receptor, git and ansible-playbook
+  # together. ace-receptor has no git; ee-minimal now carries receptor.
+  control_plane_ee_image: {{ _ee_image }}
   ee_images:
     - name: ACE EE (latest)
       image: {{ _ee_image }}
