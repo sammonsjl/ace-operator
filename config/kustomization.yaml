@@ -1,0 +1,11 @@
+---
+# Everything needed to run the operator, in dependency order. Flux (or
+# `kubectl apply -k`) can consume this directly, which keeps the manifests in
+# the repo that owns them rather than copied into a cluster repo.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - namespace.yaml
+  - crd/automation.ace.io_automationplatforms.yaml
+  - rbac/role.yaml
+  - manager.yaml
