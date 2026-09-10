@@ -9,5 +9,6 @@
     - role: postgres
     - role: deploy_gateway
     - role: initialize_gateway
+    - role: register_services
     - role: deploy_components
     - role: post_install

@@ -1,0 +1,98 @@
+---
+# Everything a component needs from the gateway before it starts, in the order
+# the gateway requires it.
+#
+# This has to run BEFORE generate_service_secret. The gateway can only issue a
+# secret for a service it knows about, and with none registered it rejects the
+# request with an empty choice list:
+#
+#     argument api-slug: invalid choice: 'controller' (choose from )
+#
+# which reads like a bad argument rather than a missing prerequisite.
+
+- name: Wait for the gateway API
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/ping/"
+    validate_certs: false
+  register: _ping
+  retries: 60
+  delay: 5
+  until: _ping.status | default(0) == 200
+
+- name: Set the gateway proxy URL
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/settings/all/"
+    method: PUT
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      gateway_proxy_url: "{{ _external_url }}"
+    status_code: [200, 202]
+  changed_when: true
+  no_log: true
+
+- name: Look up the API http port
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/http_ports/?name=port-{{ _envoy_https_port }}"
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+  register: _port_q
+  no_log: true
+
+- name: Create the API http port
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/http_ports/"
+    method: POST
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "port-{{ _envoy_https_port }}"
+      number: "{{ _envoy_https_port | int }}"
+      use_https: true
+      is_api_port: true
+    status_code: 201
+  when: _port_q.json.count == 0
+  register: _port_c
+  no_log: true
+
+- name: Remember the http port id
+  ansible.builtin.set_fact:
+    _http_port_id: >-
+      {{ (_port_q.json.count > 0)
+         | ternary(_port_q.json.results[0].id | default(0), _port_c.json.id | default(0)) }}
+
+- name: Register each service
+  ansible.builtin.include_tasks: one_service.yml
+  loop: "{{ _gw_services }}"
+  loop_control:
+    loop_var: _svc
+    label: "{{ _svc.name }}"
+
+# Only now can the gateway issue these. Each component's resource-server
+# settings are built from its secret, which is why deploy_components runs after
+# this role and not before it.
+- name: Generate a service secret per enabled component
+  kubernetes.core.k8s_exec:
+    namespace: "{{ _namespace }}"
+    pod: "{{ _gw_pod }}"
+    command: "aap-gateway-manage generate_service_secret {{ item.name }}"
+  loop: "{{ _components }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: _service_secrets
+  no_log: true
+
+- name: Keep them for the component roles to inject
+  ansible.builtin.set_fact:
+    _service_secret_map: >-
+      {{ dict(_components | map(attribute='name')
+              | zip(_service_secrets.results | map(attribute='stdout') | map('trim'))) }}
+  no_log: true

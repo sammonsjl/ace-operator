@@ -28,3 +28,14 @@ _labels:
 # redirect derives from it, so a wrong value fails at login rather than at
 # deploy.
 _external_url: "{{ gateway.external_url | default('https://' ~ ansible_operator_meta.name ~ '-gateway') }}"
+
+# The vendor's port map, unchanged. In podman these are separated by being on
+# one host's network; in a pod the gateway and envoy containers share a network
+# namespace and reach each other on 127.0.0.1 the same way.
+#
+# Defined here rather than in deploy_gateway because role defaults are scoped
+# to their own role, and register_services needs them too.
+_gw_nginx_port: 8446
+_gw_uwsgi_port: 8052
+_gw_grpc_port: 50051
+_envoy_https_port: 8443

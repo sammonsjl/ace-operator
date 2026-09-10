@@ -1,0 +1,22 @@
+---
+_gw_api: "http://{{ _name }}-gateway:{{ _gw_nginx_port }}/api/gateway/v1"
+
+# Envoy matches a service's public path and rewrites it to service_path, and
+# routes are first-match by `order` — so the gateway's "/" catch-all has to be
+# last or it swallows everything.
+#
+# Unlike the podman host, where every component is 127.0.0.1 on its own port,
+# each component here is a separate Service. The address is therefore DNS, and
+# the port is the Service port rather than the vendor's host port map.
+_gw_services: >-
+  {{ ([{'name': 'controller', 'slug': 'controller', 'path': '/api/controller/',
+         'address': _name ~ '-controller-service', 'port': 80, 'order': 1}]
+        if controller.enabled | default(true) else [])
+   + ([{'name': 'hub', 'slug': 'galaxy', 'path': '/api/galaxy/',
+         'address': _name ~ '-hub-service', 'port': 80, 'order': 2}]
+        if hub.enabled | default(true) else [])
+   + ([{'name': 'eda', 'slug': 'eda', 'path': '/api/eda/',
+         'address': _name ~ '-eda-service', 'port': 80, 'order': 3}]
+        if eda.enabled | default(true) else [])
+   + [{'name': 'gateway', 'slug': 'gateway', 'path': '/',
+        'address': _name ~ '-gateway', 'port': _gw_nginx_port, 'order': 100}] }}

@@ -1,0 +1,111 @@
+---
+# One service = a cluster, a node, and the service itself. The service type is
+# seeded by the gateway's own migrations; we look it up rather than create it.
+
+- name: "Look up the {{ _svc.name }} service type"
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/service_types/?name={{ _svc.name }}"
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+  register: _type_q
+  no_log: true
+
+- name: "Look up the {{ _svc.name }} service cluster"
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/service_clusters/?name={{ _svc.name }}"
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+  register: _cluster_q
+  no_log: true
+
+- name: "Create the {{ _svc.name }} service cluster"
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/service_clusters/"
+    method: POST
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "{{ _svc.name }}"
+      service_type: "{{ _type_q.json.results[0].id | int }}"
+    status_code: 201
+  when: _cluster_q.json.count == 0
+  register: _cluster_c
+  no_log: true
+
+- name: "Remember the {{ _svc.name }} cluster id"
+  ansible.builtin.set_fact:
+    _cluster_id: >-
+      {{ (_cluster_q.json.count > 0)
+         | ternary(_cluster_q.json.results[0].id | default(0), _cluster_c.json.id | default(0)) }}
+
+- name: "Look up the {{ _svc.name }} service node"
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/service_nodes/?name={{ _svc.name }}-{{ _name }}"
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+  register: _node_q
+  no_log: true
+
+# The address is a Service DNS name, not 127.0.0.1: on a podman host every
+# component shares one network namespace, here each is its own Service.
+- name: "Create the {{ _svc.name }} service node"
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/service_nodes/"
+    method: POST
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "{{ _svc.name }}-{{ _name }}"
+      address: "{{ _svc.address }}"
+      service_cluster: "{{ _cluster_id | int }}"
+    status_code: 201
+  when: _node_q.json.count == 0
+  no_log: true
+
+- name: "Look up the {{ _svc.name }} service"
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/services/?api_slug={{ _svc.slug }}"
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+  register: _service_q
+  no_log: true
+
+# is_service_https is false here and true on the podman host: awx-operator's
+# Service terminates plain HTTP on port 80, and the gateway is reached inside
+# the cluster rather than across a network.
+- name: "Create the {{ _svc.name }} service"
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/services/"
+    method: POST
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      name: "{{ _svc.name | capitalize }} API"
+      description: "{{ _svc.name }} behind the gateway"
+      api_slug: "{{ _svc.slug }}"
+      http_port: "{{ _http_port_id | int }}"
+      service_cluster: "{{ _cluster_id | int }}"
+      is_service_https: false
+      service_path: "{{ _svc.path }}"
+      service_port: "{{ _svc.port | int }}"
+      order: "{{ _svc.order | int }}"
+    status_code: 201
+  when: _service_q.json.count == 0
+  no_log: true
