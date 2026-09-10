@@ -40,7 +40,11 @@ data:
 
   nginx.conf: |
     worker_processes 1;
-    pid /var/run/nginx.pid;
+    # /var/run is not writable by uid 1000 in a pod, so nginx cannot drop its
+    # pid file in the default place — it exits with "Permission denied" and
+    # supervisor gives up on it, while every other process starts fine. The
+    # emptyDir below is the one writable path this container has.
+    pid /var/run/supervisor/nginx.pid;
     error_log /dev/stderr;
     events { worker_connections 1024; }
     http {
@@ -49,6 +53,13 @@ data:
       access_log /dev/stdout;
       sendfile on;
       client_max_body_size 5m;
+
+      # Same reason: every scratch path nginx may write to has to live there.
+      client_body_temp_path /var/run/supervisor/nginx-client-body;
+      proxy_temp_path       /var/run/supervisor/nginx-proxy;
+      fastcgi_temp_path     /var/run/supervisor/nginx-fastcgi;
+      uwsgi_temp_path       /var/run/supervisor/nginx-uwsgi;
+      scgi_temp_path        /var/run/supervisor/nginx-scgi;
 
       upstream uwsgi { server 127.0.0.1:{{ _gw_uwsgi_port }}; }
 
