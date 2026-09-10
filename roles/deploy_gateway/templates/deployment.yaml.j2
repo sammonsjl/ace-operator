@@ -74,12 +74,19 @@ spec:
               value: standalone
             - name: REDIS_URL
               value: redis://{{ _name }}-redis:6379/0
+            # migrate_service_data calls each component back through envoy over
+            # HTTPS, so the gateway has to trust the certificate envoy presents.
+            # Without this it fails with CERTIFICATE_VERIFY_FAILED against its
+            # own front door, and no organization ever reaches the controller.
+            - name: REQUESTS_CA_BUNDLE
+              value: /etc/ace/tls/gateway.crt
           volumeMounts: &gwmounts
             - {name: config, mountPath: /etc/ansible-automation-platform/gateway/settings.py, subPath: settings.py}
             - {name: config, mountPath: /etc/ansible-automation-platform/gateway/uwsgi.ini, subPath: uwsgi.ini}
             - {name: config, mountPath: /etc/ansible-automation-platform/gateway/nginx.conf, subPath: nginx.conf}
             - {name: config, mountPath: /etc/supervisord.conf, subPath: supervisord.conf}
             - {name: secrets, mountPath: /etc/ace/secrets, readOnly: true}
+            - {name: tls, mountPath: /etc/ace/tls, readOnly: true}
             - {name: run, mountPath: /var/run/supervisor}
 
       containers:
