@@ -173,31 +173,52 @@ metadata:
 {{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
 data:
   envoy.yaml: |
-    # Envoy holds almost no static routing. Its listeners and clusters are
-    # delivered over xDS by the gateway's gRPC control plane, which serves them
-    # from the service registry — so a route exists because a component
-    # registered itself, not because it was written here.
+    # No static listeners. The gateway programs its own front door: listeners
+    # and clusters are fetched from its xDS endpoints, so a route exists
+    # because a component registered itself, not because it was written here.
+    #
+    # xDS is REST, served by the gateway's nginx at /v3/discovery:*. The gRPC
+    # control plane on {{ _gw_grpc_port }} is a different thing entirely —
+    # ext_authz — and pointing LDS/CDS at it yields
+    #   gRPC config stream to xds_cluster closed: 12, Method not implemented
+    # on a loop, with envoy never opening a listener at all.
     node:
-      cluster: ace
-      id: ace-gateway-proxy
+      id: ace
+      cluster: gateway
+
     dynamic_resources:
       lds_config:
         resource_api_version: V3
         api_config_source:
-          api_type: GRPC
+          api_type: REST
           transport_api_version: V3
-          grpc_services:
-            - envoy_grpc: {cluster_name: xds_cluster}
+          cluster_names: [gateway-control-plane-rest]
+          refresh_delay: 5s
       cds_config:
         resource_api_version: V3
         api_config_source:
-          api_type: GRPC
+          api_type: REST
           transport_api_version: V3
-          grpc_services:
-            - envoy_grpc: {cluster_name: xds_cluster}
+          cluster_names: [gateway-control-plane-rest]
+          refresh_delay: 5s
+
     static_resources:
       clusters:
-        - name: xds_cluster
+        # The gateway API behind its own nginx. Plain HTTP: this hop is inside
+        # one pod's network namespace.
+        - name: gateway-control-plane-rest
+          type: STRICT_DNS
+          connect_timeout: 5s
+          load_assignment:
+            cluster_name: gateway-control-plane-rest
+            endpoints:
+              - lb_endpoints:
+                  - endpoint:
+                      address:
+                        socket_address: {address: 127.0.0.1, port_value: {{ _gw_nginx_port }}}
+
+        # gRPC control plane: per-request authorization, HTTP/2.
+        - name: gateway_control_plane
           type: STRICT_DNS
           connect_timeout: 5s
           typed_extension_protocol_options:
@@ -206,12 +227,13 @@ data:
               explicit_http_config:
                 http2_protocol_options: {}
           load_assignment:
-            cluster_name: xds_cluster
+            cluster_name: gateway_control_plane
             endpoints:
               - lb_endpoints:
                   - endpoint:
                       address:
                         socket_address: {address: 127.0.0.1, port_value: {{ _gw_grpc_port }}}
+
     admin:
       address:
         socket_address: {address: 127.0.0.1, port_value: 9901}
