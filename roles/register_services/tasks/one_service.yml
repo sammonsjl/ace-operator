@@ -100,6 +100,25 @@
   when: _node_q.json.count == 0
   no_log: true
 
+# Create-once is not enough: if the address was ever wrong, a later fix in
+# defaults would never reach the gateway, because the node already exists.
+# That is exactly how EDA stayed registered at a Service that never existed.
+- name: "Keep the {{ _svc.name }} service node pointing at the right Service"
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/service_nodes/{{ _node_q.json.results[0].id }}/"
+    method: PATCH
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      address: "{{ _svc.address }}"
+    status_code: [200, 202]
+  when: _node_q.json.count > 0
+  changed_when: true
+  no_log: true
+
 - name: "Look up the {{ _svc.name }} service"
   ansible.builtin.uri:
     url: "{{ _gw_api }}/services/?api_slug={{ _svc.slug }}"
