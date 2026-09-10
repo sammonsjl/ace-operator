@@ -89,5 +89,27 @@ Implemented: the CRD, the reconcile order, postgres and redis, the gateway
 (ConfigMaps, Deployment, envoy sidecar, Service), the `aap-gateway-manage` init
 chain, sub-CR rendering for all three components, and `migrate_service_data`.
 
-Not yet done: an Ingress (the Service is reachable, but nothing terminates a
+### Known gap: service registration must come first
+
+`initialize_gateway` currently calls `generate_service_secret` before anything
+has been registered with the gateway, and the gateway rejects it:
+
+    argument api-slug: invalid choice: 'controller' (choose from )
+
+The choice list is empty because no service exists yet. The containerized
+installer gets this right and shows the order:
+
+1. set the gateway proxy URL setting
+2. create the API http port
+3. **register each service** — service type, cluster, node, then the route
+4. verify the gateway answers through envoy
+5. *then* `generate_service_secret` per component
+
+So a `register_services` step belongs between `initialize_gateway` and
+`deploy_components`, driving the gateway's REST API the way
+`roles/automationgateway/tasks/postinstall.yml` does in
+[ace-containerized-installer](https://github.com/sammonsjl/ace-containerized-installer).
+Until it exists, the reconcile gets as far as a working gateway and stops.
+
+Also not done: an Ingress (the Service is reachable, but nothing terminates a
 real hostname), backup/restore kinds, and a molecule suite.
