@@ -23,3 +23,39 @@ spec:
         - podSelector:
             matchLabels:
               app.kubernetes.io/name: {{ _name }}-gateway
+---
+# galaxy-operator's per-tier egress policy for the web tier assumes OpenShift:
+# its only DNS rule allows namespace "openshift-dns" on port 5353. On vanilla
+# Kubernetes that namespace does not exist and DNS is kube-system/kube-dns on
+# 53, so the web pods resolve nothing -- and because their egress rules list no
+# catch-all (the api and content tiers get one, the web tier does not), the
+# wait-for-content-service init container blocks forever on a name lookup while
+# the content service it is waiting for is perfectly healthy.
+#
+# Egress rules union across policies, so this grants the missing DNS path
+# without touching the operator's own policy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ _name }}-hub-dns
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  podSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/component
+        operator: In
+        values: [api, content-server, webserver, worker]
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - {protocol: UDP, port: 53}
+        - {protocol: TCP, port: 53}
