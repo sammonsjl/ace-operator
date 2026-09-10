@@ -102,8 +102,15 @@ spec:
             httpGet:
               path: /api/gateway/v1/ping/
               port: {{ _gw_nginx_port }}
-            initialDelaySeconds: 20
-            periodSeconds: 10
+            # A cold gateway answers its first ping in several seconds: uwsgi
+            # loads the WSGI app, then the ping itself hits the database. The
+            # probe's default 1s timeout cut that off every time, and nginx
+            # logged the probe as 499 (client closed request) while the app
+            # was working perfectly -- so the pod never went Ready and the
+            # rollout wedged with the previous pod still serving.
+            initialDelaySeconds: 45
+            periodSeconds: 15
+            timeoutSeconds: 10
             failureThreshold: 30
 
         # Same pod, so envoy reaches the gateway's gRPC control plane and nginx
