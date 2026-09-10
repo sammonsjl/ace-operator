@@ -45,6 +45,32 @@
       {{ (_cluster_q.json.count > 0)
          | ternary(_cluster_q.json.results[0].id | default(0), _cluster_c.json.id | default(0)) }}
 
+# Two cluster settings that only matter on Kubernetes.
+#
+# upstream_hostname: envoy otherwise sends the cluster name as the authority,
+# and a name like "cluster-1-80-nodes:*" is an unparseable host:port that
+# Django rejects with 400 before any view runs.
+#
+# health_checks_enabled false: the gateway programs an active check with no
+# host, which hits the same wall — and here it is redundant. A Service only
+# routes to pods that pass their readiness probe, so kubernetes has already
+# answered the question envoy is asking.
+- name: "Tune the {{ _svc.name }} cluster for a Service upstream"
+  ansible.builtin.uri:
+    url: "{{ _gw_api }}/service_clusters/{{ _cluster_id | int }}/"
+    method: PATCH
+    validate_certs: false
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+    body_format: json
+    body:
+      upstream_hostname: "{{ _svc.address }}"
+      health_checks_enabled: false
+    status_code: [200, 202]
+  changed_when: true
+  no_log: true
+
 - name: "Look up the {{ _svc.name }} service node"
   ansible.builtin.uri:
     url: "{{ _gw_api }}/service_nodes/?name={{ _svc.name }}-{{ _name }}"

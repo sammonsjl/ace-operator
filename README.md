@@ -89,28 +89,20 @@ Implemented: the CRD, the reconcile order, postgres and redis, the gateway
 (ConfigMaps, Deployment, envoy sidecar, Service), the `aap-gateway-manage` init
 chain, sub-CR rendering for all three components, and `migrate_service_data`.
 
-### Known gap: envoy's health check to the controller
+### Resolved: making envoy's clusters work against Services
 
-The gateway and the console work through the front door. `/api/controller/`
-returns 503, because envoy marks the controller cluster `failed_active_hc`.
+`/api/controller/` returned 503 because envoy marked the cluster
+`failed_active_hc`. Two `service_cluster` settings fix it, both specific to
+Kubernetes:
 
-The cause is exact. The gateway programs an active HTTP health check with no
-`host` set, so envoy sends the cluster name as the authority:
-
-    Host: cluster-1-80-nodes:*    ->  400
-    Host: bogus.example           ->  200
-    (no Host manipulation)        ->  200
-
-AWX has `ALLOWED_HOSTS = ['*']`, so it is not an allow-list problem — the `*`
-makes the value an unparseable host:port, and Django rejects it before any
-view runs. The gateway's own cluster passes the identical check, so this is
-specific to how Django parses the header.
-
-Worth trying next: whether the gateway exposes a health-check host on the
-service or service-cluster record (nothing health-related appears in
-`/api/gateway/v1/settings/all/`), or whether the containerized installer
-avoids this because its components sit behind their own nginx on an HTTPS
-port. Everything else in the chain is verified working.
+- **`upstream_hostname`** — envoy otherwise sends the cluster name as the
+  authority, and `cluster-1-80-nodes:*` is an unparseable `host:port` that
+  Django rejects with 400 before any view runs. Measured: that header gives
+  400 where any ordinary hostname gives 200, with `ALLOWED_HOSTS` already
+  `['*']` — so it was never an allow-list problem.
+- **`health_checks_enabled: false`** — the gateway's active check has no host
+  and hits the same wall. On Kubernetes it is also redundant: a Service only
+  routes to pods that pass their readiness probe.
 
 ### Resolved: service registration must come first
 
