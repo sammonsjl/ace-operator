@@ -17,9 +17,13 @@ rules:
   - apiGroups: [""]
     resources: ["pods"]
     verbs: ["get", "list", "watch"]
+  # get as well as create: the python client opens the exec stream with
+  # connect_get_namespaced_pod_exec, so create alone yields
+  # "Handshake status 403 Forbidden" from the websocket upgrade — which reads
+  # like a networking problem rather than an RBAC one.
   - apiGroups: [""]
     resources: ["pods/exec"]
-    verbs: ["create"]
+    verbs: ["create", "get"]
   - apiGroups: ["apps"]
     resources: ["deployments", "statefulsets"]
     verbs: ["*"]
