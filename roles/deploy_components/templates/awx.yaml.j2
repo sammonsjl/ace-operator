@@ -12,7 +12,10 @@ metadata:
 spec:
   image: {{ _controller_image.split(':')[0] }}
   image_version: {{ _controller_image.split(':')[-1] }}
-  image_pull_policy: {{ image_pull_policy | default('IfNotPresent') }}
+  # Always by default, because the image tags float. The CRD default changed
+  # too, but the template carried its own IfNotPresent — so the operator kept
+  # re-rendering the CR with it and a rebuilt image never reached the pods.
+  image_pull_policy: {{ image_pull_policy | default('Always') }}
   replicas: {{ controller.replicas | default(1) }}
 
   # Our images, not awx-operator's upstream defaults — without these it would

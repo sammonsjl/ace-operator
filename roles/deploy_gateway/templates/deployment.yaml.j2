@@ -51,7 +51,7 @@ spec:
       initContainers:
         - name: migrate
           image: {{ _gateway_image }}
-          imagePullPolicy: {{ image_pull_policy | default('IfNotPresent') }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
           command: ["aap-gateway-manage", "migrate", "--noinput"]
           env: &gwenv
             - name: DJANGO_SETTINGS_MODULE
@@ -85,7 +85,7 @@ spec:
       containers:
         - name: gateway
           image: {{ _gateway_image }}
-          imagePullPolicy: {{ image_pull_policy | default('IfNotPresent') }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
           env: *gwenv
           volumeMounts: *gwmounts
           ports:
@@ -104,7 +104,7 @@ spec:
         # network: host, without needing the host's network.
         - name: envoy
           image: {{ _envoy_image }}
-          imagePullPolicy: {{ image_pull_policy | default('IfNotPresent') }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
           args: ["-c", "/etc/envoy/envoy.yaml", "--service-cluster", "ace"]
           volumeMounts:
             - {name: envoy-config, mountPath: /etc/envoy}
