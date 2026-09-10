@@ -79,7 +79,22 @@
 # Only now can the gateway issue these. Each component's resource-server
 # settings are built from its secret, which is why deploy_components runs after
 # this role and not before it.
-- name: Generate a service secret per enabled component
+#
+# CREATE-ONCE, and this one is not a nicety. generate_service_secret mints a
+# NEW secret every time it is called, so calling it each reconcile rewrote the
+# sub-CR's extra_settings, which rolled the component's Deployment, which
+# registered a new instance and left the old one behind. The platform never
+# settled and AWX accumulated dozens of dead instances that the scheduler
+# still handed work to.
+- name: Look for service secrets already issued
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-service-secrets"
+  register: _svc_secret_obj
+  no_log: true
+
+- name: Issue a service secret per enabled component
   kubernetes.core.k8s_exec:
     namespace: "{{ _namespace }}"
     pod: "{{ _gw_pod }}"
@@ -88,30 +103,49 @@
   loop_control:
     label: "{{ item.name }}"
   register: _service_secrets
+  when: _svc_secret_obj.resources | length == 0
   no_log: true
 
-# stdout is two lines, not one: aap-gateway-manage prints
-#
-#     Failed library import, colors won't be in logs: No module named 'colorama'
-#     3Zmkqq3bfK78KHv6czfq...
-#
-# so trimming the whole thing keeps the warning as part of the value, and the
-# resulting multi-line string breaks the YAML of every sub-CR that embeds it.
-# The secret is the only unbroken run of base64url characters in there.
+- name: Store them so a later reconcile reuses the same values
+  kubernetes.core.k8s:
+    state: present
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: "{{ _name }}-service-secrets"
+        namespace: "{{ _namespace }}"
+        labels: "{{ _labels }}"
+      stringData: >-
+        {{ dict(_components | map(attribute='name')
+                | zip(_service_secrets.results | map(attribute='stdout')
+                      | map('regex_search', '[A-Za-z0-9_-]{40,}') | list)) }}
+  when: _svc_secret_obj.resources | length == 0
+  no_log: true
+
+- name: Read the stored secrets back
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-service-secrets"
+  register: _svc_secret_final
+  no_log: true
+
 - name: Keep them for the component roles to inject
   ansible.builtin.set_fact:
     _service_secret_map: >-
-      {{ dict(_components | map(attribute='name')
-              | zip(_service_secrets.results | map(attribute='stdout')
-                    | map('regex_search', '[A-Za-z0-9_-]{40,}') | list)) }}
+      {{ _svc_secret_final.resources[0].data
+         | dict2items | map(attribute='key') | zip(
+           _svc_secret_final.resources[0].data | dict2items
+           | map(attribute='value') | map('b64decode')) | list | items2dict(key_name=0, value_name=1) }}
   no_log: true
 
-- name: Fail loudly if a secret could not be extracted
+- name: Fail loudly if a secret is missing
   ansible.builtin.assert:
     that: _service_secret_map[item.name] | default('', true) | length >= 40
     fail_msg: >-
-      No service secret parsed for {{ item.name }}. generate_service_secret
-      probably changed its output format.
+      No service secret for {{ item.name }}. Delete the
+      {{ _name }}-service-secrets Secret to have them reissued.
   loop: "{{ _components }}"
   loop_control:
     label: "{{ item.name }}"
