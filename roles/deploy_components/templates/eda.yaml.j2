@@ -1,6 +1,11 @@
 ---
 # EDA is the one kind whose name is the same upstream and downstream, so this
 # template is the closest of the three to the vendor's own.
+#
+# Field names here are the *upstream* eda-server-operator's, which differ from
+# the vendor's in several places. Its CRD sets x-kubernetes-preserve-unknown-
+# fields, so a wrong name is accepted silently and then ignored -- every key
+# below was checked against the CRD schema and the operator's own role defaults.
 apiVersion: eda.ansible.com/v1alpha1
 kind: EDA
 metadata:
@@ -12,19 +17,47 @@ spec:
   image: {{ _eda_image.split(':')[0] }}
   image_version: {{ _eda_image.split(':')[-1] }}
   image_pull_policy: {{ image_pull_policy | default('IfNotPresent') }}
-  replicas: {{ eda.replicas | default(1) }}
 
-  # The decision environment rulebooks run in.
-  default_decision_environment: {{ _de_image }}
+  # We don't build an eda-ui image -- the gateway serves the platform console,
+  # and EDA's own UI would only duplicate it behind a second route.
+  ui_disabled: true
 
-  postgres_configuration_secret: {{ _name }}-eda-pg
+  api:
+    replicas: {{ eda.replicas | default(1) }}
+
+  # Required by the CRD. EDA appends /api/v2/ to this itself, so it must be the
+  # controller's own Service and not the gateway's /api/controller/ prefix,
+  # which would resolve to /api/controller/api/v2/.
+  automation_server_url: {{ eda.automation_server_url | default('http://' ~ _name ~ '-controller-service.' ~ _namespace ~ '.svc') }}
+  automation_server_ssl_verify: "no"
+
+  database_secret: {{ _name }}-eda-pg
+  # Deliberately not set: ace-db-fields-encryption is the controller's, and its
+  # secret_key is that component's Django SECRET_KEY. Left unset, the operator
+  # generates ace-eda-db-fields-encryption-secret so EDA gets its own.
   admin_password_secret: {{ _name }}-admin-password
 
-  resource_server:
-    url: {{ gateway.external_url | default('https://' ~ _name ~ '-gateway') }}
-    secret_key_secret: {{ _name }}-eda-service-secret
-    validate_https: false
-
-  # EDA reaches Redis over TCP rather than a socket — the only component that
-  # does, on the containerized track as well.
-  redis_host: {{ _name }}-redis
+  # This operator has no resource_server field. Its only injection point is
+  # extra_settings, which lands in the -env-properties ConfigMap and reaches
+  # every pod via envFrom -- so these must carry EDA's dynaconf prefix
+  # themselves, with __ for nesting.
+  extra_settings:
+    - setting: EDA_ANSIBLE_BASE_JWT_KEY
+      value: "http://{{ _name }}-gateway.{{ _namespace }}.svc:{{ _gw_nginx_port }}"
+    - setting: EDA_ANSIBLE_BASE_JWT_VALIDATE_CERT
+      value: "false"
+    - setting: EDA_ANSIBLE_BASE_JWT_REDIRECT_TYPE
+      value: "eda"
+    - setting: EDA_RESOURCE_SERVER__URL
+      value: "http://{{ _name }}-gateway.{{ _namespace }}.svc:{{ _gw_nginx_port }}"
+    # NOTE: this is a ConfigMap, not a Secret. envFrom+configMapRef is the only
+    # path this operator offers, so the service secret is as exposed as the
+    # ConfigMap is. It is the same value already held in {{ _name }}-service-secrets.
+    - setting: EDA_RESOURCE_SERVER__SECRET_KEY
+      value: "{{ _service_secret_map['eda'] }}"
+    - setting: EDA_RESOURCE_SERVER__VALIDATE_HTTPS
+      value: "false"
+{% for s in eda.extra_settings | default([]) %}
+    - setting: {{ s.setting }}
+      value: "{{ s.value }}"
+{% endfor %}
