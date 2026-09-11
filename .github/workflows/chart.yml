@@ -20,6 +20,13 @@ jobs:
           diff -u config/crd/automation.ace.io_automationplatforms.yaml \
                   charts/ace/crds/automation.ace.io_automationplatforms.yaml
 
+      # The chart's ClusterRole is generated from the kustomize base's, so the
+      # operator holds the same permissions however it was installed. They
+      # drifted once already and the operator could not create the
+      # controller's RBAC.
+      - name: The chart's ClusterRole must match the base
+        run: python3 hack/sync-chart-rbac.py --check
+
       - uses: azure/setup-helm@v4
         with:
           version: v3.16.3

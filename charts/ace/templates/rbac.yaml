@@ -5,9 +5,11 @@ metadata:
   name: {{ include "ace.fullname" . }}
   labels:
     {{- include "ace.labels" . | nindent 4 }}
-# These are the operator's own permissions, and they are wider than they look
-# because it creates the component operators' custom resources and patches the
-# NetworkPolicies galaxy-operator installs.
+# GENERATED from config/rbac/role.yaml by hack/sync-chart-rbac.py -- do not
+# edit. CI fails if this file does not match what that script produces.
+#
+# Wider than it looks: the operator creates the components' Deployments, Jobs
+# and the RBAC their pods need, so it must hold those permissions itself.
 rules:
   - apiGroups:
     - automation.ace.io
@@ -83,6 +85,19 @@ rules:
     verbs:
     - create
     - patch
+  - apiGroups:
+    - batch
+    resources:
+    - jobs
+    verbs:
+    - '*'
+  - apiGroups:
+    - rbac.authorization.k8s.io
+    resources:
+    - roles
+    - rolebindings
+    verbs:
+    - '*'
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
