@@ -44,6 +44,21 @@ spec:
 {{ c.db_env() }}
           volumeMounts:
 {{ c.app_mounts() }}
+        # receptor.conf has to live on a writable filesystem. AWX takes a lock
+        # beside it -- /etc/receptor/receptor.conf.lock -- and a ConfigMap
+        # subPath mount is read-only, so the dispatcher died with
+        # PermissionError and no job was ever picked up.
+        - name: init-receptor
+          image: {{ _ee_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              sed "s/HOSTNAME/$HOSTNAME/g" /etc/receptor-src/receptor.conf \
+                > /etc/receptor/receptor.conf
+          volumeMounts:
+            - {name: receptor-config, mountPath: /etc/receptor-src}
+            - {name: receptor-etc, mountPath: /etc/receptor}
       containers:
 {{ c.redis_sidecar() }}
         - name: task
@@ -58,7 +73,7 @@ spec:
               value: "true"
           volumeMounts:
 {{ c.app_mounts() }}
-            - {name: receptor-config, mountPath: /etc/receptor/receptor.conf, subPath: receptor.conf}
+            - {name: receptor-etc, mountPath: /etc/receptor}
             - {name: receptor-socket, mountPath: /var/run/receptor}
             - {name: tmp, mountPath: /tmp}
           resources:
@@ -68,13 +83,10 @@ spec:
         - name: receptor
           image: {{ _ee_image }}
           imagePullPolicy: {{ image_pull_policy | default('Always') }}
-          command: ["sh", "-c"]
-          args:
-            - |
-              sed "s/HOSTNAME/$HOSTNAME/g" /etc/receptor/receptor.conf > /tmp/receptor.conf
-              exec receptor --config /tmp/receptor.conf
+          args: ["--config", "/etc/receptor/receptor.conf"]
+          command: ["receptor"]
           volumeMounts:
-            - {name: receptor-config, mountPath: /etc/receptor/receptor.conf, subPath: receptor.conf}
+            - {name: receptor-etc, mountPath: /etc/receptor}
             - {name: receptor-socket, mountPath: /var/run/receptor}
             - {name: tmp, mountPath: /tmp}
           resources:
@@ -93,5 +105,7 @@ spec:
 {{ c.volumes() }}
         - name: receptor-config
           configMap: {name: {{ _name }}-controller-config}
+        - name: receptor-etc
+          emptyDir: {}
         - name: receptor-socket
           emptyDir: {}

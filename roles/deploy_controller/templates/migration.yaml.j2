@@ -32,6 +32,11 @@ spec:
               # the demo objects in place; it is safe to re-run.
               awx-manage create_preload_data
               awx-manage register_default_execution_environments
+              # Without a queue the control instance has no capacity and jobs
+              # sit in pending forever -- the instance registers itself on
+              # startup, but nothing puts it in an instance group.
+              awx-manage register_queue --queuename=controlplane --instance_percent=100 --pool_type=control || true
+              awx-manage register_queue --queuename=default --instance_percent=100 || true
           env:
 {{ c.db_env() }}
           volumeMounts:
