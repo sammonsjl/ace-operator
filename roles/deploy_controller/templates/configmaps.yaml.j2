@@ -85,5 +85,24 @@ data:
         command: ansible-runner
         params: worker
         allowruntimeparams: true
+    # Container-group execution submits work of these two types. Without them
+    # receptor accepts the job and then refuses it:
+    #   Failed to start work unit: unknown work type kubernetes-incluster-auth
+    # incluster uses the pod's own ServiceAccount, which is why the task pod
+    # carries a Role that can create pods and read their logs.
+    - work-kubernetes:
+        worktype: kubernetes-incluster-auth
+        authmethod: incluster
+        allowruntimeauth: true
+        allowruntimepod: true
+        allowruntimeparams: true
+    # runtime is the same thing with credentials supplied by the job, for
+    # container groups pointed at a cluster other than this one.
+    - work-kubernetes:
+        worktype: kubernetes-runtime-auth
+        authmethod: runtime
+        allowruntimeauth: true
+        allowruntimepod: true
+        allowruntimeparams: true
     - tcp-listener:
         port: {{ _ctl_receptor_port }}
