@@ -42,8 +42,33 @@
     name: "{{ _name }}-gateway-tls"
   register: _tls_existing
 
+# Create-once is not enough. The SANs derive from gateway.external_url, so
+# changing the platform's hostname leaves a certificate that does not cover it
+# and browsers reject the new name -- while everything inside the cluster keeps
+# working, because those SANs never changed.
+- name: Read the SANs on the existing certificate
+  when: _tls_existing.resources | length > 0
+  block:
+    - name: Write it somewhere openssl can read
+      ansible.builtin.copy:
+        content: "{{ _tls_existing.resources[0].data['tls.crt'] | b64decode }}"
+        dest: /tmp/existing-gateway.crt
+        mode: "0600"
+      no_log: true
+
+    - name: Inspect it
+      community.crypto.x509_certificate_info:
+        path: /tmp/existing-gateway.crt
+      register: _tls_info
+
+- name: Work out whether the certificate still covers every name
+  ansible.builtin.set_fact:
+    _tls_stale: >-
+      {{ _tls_existing.resources | length > 0
+         and (_gw_sans | difference(_tls_info.subject_alt_name | default([]))) | length > 0 }}
+
 - name: Generate a self-signed certificate for the front door
-  when: _tls_existing.resources | length == 0
+  when: _tls_existing.resources | length == 0 or _tls_stale | bool
   block:
     - name: Create a private key
       community.crypto.openssl_privatekey:
@@ -86,6 +111,23 @@
         path: "{{ item }}"
         state: absent
       loop: [/tmp/gateway.key, /tmp/gateway.csr, /tmp/gateway.crt]
+
+    # Only on replacement. The secret is a mounted volume, and both envoy and
+    # the gateway read the certificate once at startup, so a rewritten secret
+    # under a running pod changes nothing until it restarts.
+    - name: Restart the gateway so it serves the new certificate
+      kubernetes.core.k8s:
+        state: patched
+        kind: Deployment
+        name: "{{ _name }}-gateway"
+        namespace: "{{ _namespace }}"
+        definition:
+          spec:
+            template:
+              metadata:
+                annotations:
+                  ace.io/tls-rotated-at: "{{ ansible_date_time.iso8601 | default(now().isoformat()) }}"
+      when: _tls_stale | default(false) | bool
 
 - name: Read back the secrets the Deployment references
   kubernetes.core.k8s_info:
