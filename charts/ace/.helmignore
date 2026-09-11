@@ -1,4 +1,8 @@
+# Note: do NOT ignore *.tgz here. Chart dependencies are fetched into
+# charts/ as tarballs, and ignoring them makes Helm load the chart with its
+# dependency missing -- "chart directory is missing these dependencies".
 .DS_Store
 .git/
 .gitignore
-*.tgz
+*.swp
+*.bak
