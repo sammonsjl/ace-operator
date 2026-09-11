@@ -143,11 +143,21 @@
 - name: Render the gateway configuration
   kubernetes.core.k8s:
     state: present
+    # Server-side apply. state: present alone is a strategic merge patch,
+    # which adds and updates list entries but never removes them -- a
+    # volumeMount dropped from a template stayed on the live Deployment
+    # forever, and the reconcile reported success every time.
+    apply: true
     definition: "{{ lookup('template', 'configmaps.yaml.j2') | from_yaml_all | list }}"
 
 - name: Deploy the gateway
   kubernetes.core.k8s:
     state: present
+    # Server-side apply. state: present alone is a strategic merge patch,
+    # which adds and updates list entries but never removes them -- a
+    # volumeMount dropped from a template stayed on the live Deployment
+    # forever, and the reconcile reported success every time.
+    apply: true
     definition: "{{ lookup('template', 'deployment.yaml.j2') | from_yaml_all | list }}"
 
 - name: Wait for it to become ready

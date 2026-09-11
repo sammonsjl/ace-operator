@@ -91,6 +91,11 @@
 - name: Render the controller's configuration
   kubernetes.core.k8s:
     state: present
+    # Server-side apply. state: present alone is a strategic merge patch,
+    # which adds and updates list entries but never removes them -- a
+    # volumeMount dropped from a template stayed on the live Deployment
+    # forever, and the reconcile reported success every time.
+    apply: true
     definition: "{{ item }}"
   loop:
     - "{{ lookup('template', 'configmaps.yaml.j2') | from_yaml }}"
@@ -102,6 +107,11 @@
 - name: Render the controller's RBAC and Service
   kubernetes.core.k8s:
     state: present
+    # Server-side apply. state: present alone is a strategic merge patch,
+    # which adds and updates list entries but never removes them -- a
+    # volumeMount dropped from a template stayed on the live Deployment
+    # forever, and the reconcile reported success every time.
+    apply: true
     definition: "{{ item }}"
   loop: "{{ lookup('template', 'rbac.yaml.j2') | from_yaml_all | list }}"
   loop_control:
@@ -119,6 +129,11 @@
 - name: Run the database migrations
   kubernetes.core.k8s:
     state: present
+    # Server-side apply. state: present alone is a strategic merge patch,
+    # which adds and updates list entries but never removes them -- a
+    # volumeMount dropped from a template stayed on the live Deployment
+    # forever, and the reconcile reported success every time.
+    apply: true
     definition: "{{ lookup('template', 'migration.yaml.j2') | from_yaml }}"
 
 - name: Wait for the migrations to finish
@@ -134,6 +149,11 @@
 - name: Deploy the controller
   kubernetes.core.k8s:
     state: present
+    # Server-side apply. state: present alone is a strategic merge patch,
+    # which adds and updates list entries but never removes them -- a
+    # volumeMount dropped from a template stayed on the live Deployment
+    # forever, and the reconcile reported success every time.
+    apply: true
     definition: "{{ item }}"
   loop:
     - "{{ lookup('template', 'web.yaml.j2') | from_yaml }}"

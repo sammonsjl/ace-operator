@@ -32,6 +32,11 @@
 - name: Render EDA's configuration
   kubernetes.core.k8s:
     state: present
+    # Server-side apply. state: present alone is a strategic merge patch,
+    # which adds and updates list entries but never removes them -- a
+    # volumeMount dropped from a template stayed on the live Deployment
+    # forever, and the reconcile reported success every time.
+    apply: true
     definition: "{{ item }}"
   loop: "{{ lookup('template', 'configmap.yaml.j2') | from_yaml_all | list }}"
   loop_control:
@@ -41,6 +46,11 @@
 - name: Render EDA's services and workloads
   kubernetes.core.k8s:
     state: present
+    # Server-side apply. state: present alone is a strategic merge patch,
+    # which adds and updates list entries but never removes them -- a
+    # volumeMount dropped from a template stayed on the live Deployment
+    # forever, and the reconcile reported success every time.
+    apply: true
     definition: "{{ item }}"
   loop: "{{ lookup('template', 'workloads.yaml.j2') | from_yaml_all | list }}"
   loop_control:
