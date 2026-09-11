@@ -5,6 +5,62 @@
 # migration Job, and the RBAC the task pod needs to launch container-group
 # jobs as pods.
 
+- name: Read the controller's database connection
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-controller-pg"
+  register: _ctl_pg_secret
+  no_log: true
+
+- name: Keep the connection details for credentials.py
+  ansible.builtin.set_fact:
+    _ctl_pg: >-
+      {{ dict(_ctl_pg_secret.resources[0].data | dict2items
+              | map(attribute='key') | list
+              | zip(_ctl_pg_secret.resources[0].data | dict2items
+                    | map(attribute='value') | map('b64decode') | list)) }}
+  no_log: true
+
+- name: Create the websocket broadcast secret, only if it does not exist
+  block:
+    - name: Look for an existing one
+      kubernetes.core.k8s_info:
+        kind: Secret
+        namespace: "{{ _namespace }}"
+        name: "{{ _name }}-controller-broadcast"
+      register: _ctl_ws
+
+    # Shared between web replicas so they can fan job output out to each
+    # other; regenerating it just disconnects them until they all restart.
+    - name: Generate one
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ _name }}-controller-broadcast"
+            namespace: "{{ _namespace }}"
+            labels: "{{ _labels }}"
+          stringData:
+            secret: "{{ lookup('password', '/dev/null length=32 chars=ascii_letters,digits') }}"
+      when: _ctl_ws.resources | length == 0
+      no_log: true
+
+    - name: Read it back
+      kubernetes.core.k8s_info:
+        kind: Secret
+        namespace: "{{ _namespace }}"
+        name: "{{ _name }}-controller-broadcast"
+      register: _ctl_ws_final
+      no_log: true
+
+- name: Keep the websocket secret for credentials.py
+  ansible.builtin.set_fact:
+    _ctl_ws_secret: "{{ _ctl_ws_final.resources[0].data.secret | b64decode }}"
+  no_log: true
+
 - name: Create the controller's Django secret key, only if it does not exist
   block:
     - name: Look for an existing secret key
@@ -39,6 +95,7 @@
   loop:
     - "{{ lookup('template', 'configmaps.yaml.j2') | from_yaml }}"
     - "{{ lookup('template', 'settings.yaml.j2') | from_yaml }}"
+    - "{{ lookup('template', 'credentials.yaml.j2') | from_yaml }}"
   loop_control:
     label: "{{ item.metadata.name }}"
 
