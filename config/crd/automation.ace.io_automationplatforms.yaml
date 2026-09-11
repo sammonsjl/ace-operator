@@ -94,7 +94,23 @@ spec:
                       type: string
                       description: >-
                         URL browsers reach the platform on. Every component's
-                        JWT audience and redirect config derives from it.
+                        JWT audience and redirect config derives from it, and
+                        the gateway's TLS certificate gains it as a SAN.
+                    service_type:
+                      type: string
+                      default: ClusterIP
+                      enum: [ClusterIP, NodePort, LoadBalancer]
+                      description: >-
+                        Service type for the front door. envoy terminates TLS
+                        on 443 itself, so LoadBalancer gives it a real address
+                        rather than an HTTP proxy in front of it.
+                    service_annotations:
+                      type: object
+                      additionalProperties: {type: string}
+                      description: >-
+                        Annotations on the gateway Service, for whatever
+                        watches Services -- with external-dns that is
+                        external-dns.alpha.kubernetes.io/hostname.
                 ee_image:
                   type: string
                   description: Execution environment jobs run in.
