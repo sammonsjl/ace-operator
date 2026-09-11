@@ -6,7 +6,18 @@ metadata:
   namespace: {{ _namespace }}
   labels:
 {{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+{% if gateway.service_annotations is defined %}
+  # Used to publish the platform's name to whatever watches Services -- with
+  # external-dns that is external-dns.alpha.kubernetes.io/hostname.
+  annotations:
+{{ gateway.service_annotations | to_nice_yaml(indent=2) | indent(4, True) }}
+{% endif %}
 spec:
+  # ClusterIP by default: the platform is reachable in-cluster and nothing
+  # assumes an address the cluster cannot hand out. Set LoadBalancer to give
+  # the front door its own IP -- envoy terminates TLS on 443 itself, so it
+  # wants a real address rather than an HTTP proxy in front of it.
+  type: {{ gateway.service_type | default('ClusterIP') }}
   selector:
     app.kubernetes.io/name: {{ _name }}-gateway
   ports:
