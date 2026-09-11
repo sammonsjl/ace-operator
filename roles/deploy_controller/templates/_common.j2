@@ -6,6 +6,13 @@
             # Only the pod's own identity comes in this way.
             - name: MY_POD_UID
               valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+            # AWX_CONTAINER_GROUP_DEFAULT_NAMESPACE reads this, and falls back
+            # to "default" without it -- container-group jobs then try to
+            # create their pod in the wrong namespace and are refused:
+            #   pods is forbidden: User "system:serviceaccount:ace:ace-controller"
+            #   cannot create resource "pods" in the namespace "default"
+            - name: MY_POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
 {% endmacro %}
 {% macro app_mounts() %}
             - {name: settings, mountPath: {{ _ctl_settings_dir }}/settings.py, subPath: settings.py}
