@@ -19,7 +19,8 @@
   when: hub.enabled | default(true)
 
 - name: Deploy EDA
-  ansible.builtin.include_tasks: eda.yml
+  ansible.builtin.include_role:
+    name: deploy_eda
   when: eda.enabled | default(true)
 
 # Waiting happens after every CR exists, not between them. Inline waits meant a

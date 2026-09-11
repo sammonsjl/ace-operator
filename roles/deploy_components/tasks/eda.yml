@@ -1,5 +1,0 @@
----
-- name: Render the EDA CR
-  kubernetes.core.k8s:
-    state: present
-    definition: "{{ lookup('template', 'eda.yaml.j2') | from_yaml }}"

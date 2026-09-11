@@ -1,0 +1,47 @@
+---
+# EDA, deployed directly rather than through eda-server-operator. Same boundary
+# as the hub: that operator's manifests were read as a behavioural spec, and
+# what is written here is the shape of the resources it produced.
+
+- name: Create EDA's secret key, only if it does not exist
+  block:
+    - name: Look for an existing key
+      kubernetes.core.k8s_info:
+        kind: Secret
+        namespace: "{{ _namespace }}"
+        name: "{{ _name }}-eda-secret-key"
+      register: _eda_key
+
+    # EDA encrypts stored credentials with this, so reissuing it makes every
+    # existing one unreadable.
+    - name: Generate one
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ _name }}-eda-secret-key"
+            namespace: "{{ _namespace }}"
+            labels: "{{ _labels }}"
+          stringData:
+            secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
+      when: _eda_key.resources | length == 0
+      no_log: true
+
+- name: Render EDA's configuration
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ item }}"
+  loop: "{{ lookup('template', 'configmap.yaml.j2') | from_yaml_all | list }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  no_log: true
+
+- name: Render EDA's services and workloads
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ item }}"
+  loop: "{{ lookup('template', 'workloads.yaml.j2') | from_yaml_all | list }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"

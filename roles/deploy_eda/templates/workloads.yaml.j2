@@ -1,0 +1,215 @@
+{%- macro db_env() %}
+            - {name: EDA_DB_HOST, valueFrom: {secretKeyRef: {name: {{ _name }}-eda-pg, key: host}}}
+            - {name: EDA_ACTIVATION_DB_HOST, valueFrom: {secretKeyRef: {name: {{ _name }}-eda-pg, key: host}}}
+            - {name: EDA_DB_PORT, valueFrom: {secretKeyRef: {name: {{ _name }}-eda-pg, key: port}}}
+            - {name: EDA_DB_NAME, valueFrom: {secretKeyRef: {name: {{ _name }}-eda-pg, key: database}}}
+            - {name: EDA_DB_USER, valueFrom: {secretKeyRef: {name: {{ _name }}-eda-pg, key: username}}}
+            - {name: EDA_DB_PASSWORD, valueFrom: {secretKeyRef: {name: {{ _name }}-eda-pg, key: password}}}
+            - {name: EDA_SECRET_KEY, valueFrom: {secretKeyRef: {name: {{ _name }}-eda-secret-key, key: secret_key}}}
+            - {name: EDA_MQ_HOST, value: "{{ _name }}-eda-redis-svc"}
+            - {name: EDA_MQ_PORT, value: "{{ _eda_redis_port }}"}
+{%- endmacro %}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ _name }}-eda-redis-svc
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  selector: {app.kubernetes.io/name: {{ _name }}-eda-redis}
+  ports: [{name: redis, port: {{ _eda_redis_port }}, targetPort: {{ _eda_redis_port }}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ _name }}-eda-api
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  selector: {app.kubernetes.io/name: {{ _name }}-eda-api}
+  ports: [{name: http, port: {{ _eda_web_port }}, targetPort: {{ _eda_web_port }}}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ _name }}-eda-daphne
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  selector: {app.kubernetes.io/name: {{ _name }}-eda-api}
+  ports: [{name: ws, port: {{ _eda_daphne_port }}, targetPort: {{ _eda_daphne_port }}}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ _name }}-eda-redis
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+    app.kubernetes.io/name: {{ _name }}-eda-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: {{ _name }}-eda-redis}
+  template:
+    metadata:
+      labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(8, True) }}
+        app.kubernetes.io/name: {{ _name }}-eda-redis
+    spec:
+      containers:
+        - name: redis
+          image: {{ _redis_image }}
+          imagePullPolicy: {{ image_pull_policy | default('IfNotPresent') }}
+          ports: [{containerPort: {{ _eda_redis_port }}}]
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ _name }}-eda-api
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+    app.kubernetes.io/name: {{ _name }}-eda-api
+spec:
+  replicas: {{ eda.replicas | default(1) }}
+  selector:
+    matchLabels: {app.kubernetes.io/name: {{ _name }}-eda-api}
+  template:
+    metadata:
+      labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(8, True) }}
+        app.kubernetes.io/name: {{ _name }}-eda-api
+    spec:
+      initContainers:
+        # The API owns the schema; every worker waits on it.
+        - name: run-migrations
+          image: {{ _eda_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["/bin/bash", "-c", "aap-eda-manage migrate --noinput"]
+          envFrom: [{configMapRef: {name: {{ _name }}-eda-config}}]
+          env:
+{{ db_env() }}
+        # Seeds the default roles and permissions. Safe to re-run.
+        - name: initial-data
+          image: {{ _eda_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["/bin/bash", "-c", "aap-eda-manage create_initial_data"]
+          envFrom: [{configMapRef: {name: {{ _name }}-eda-config}}]
+          env:
+{{ db_env() }}
+      containers:
+        - name: api
+          image: {{ _eda_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["/bin/bash", "-c", "gunicorn --bind 0.0.0.0:{{ _eda_api_port }} --workers 2 aap_eda.wsgi:application"]
+          envFrom: [{configMapRef: {name: {{ _name }}-eda-config}}]
+          env:
+{{ db_env() }}
+          resources:
+            requests: {cpu: 50m, memory: 350Mi}
+        - name: daphne
+          image: {{ _eda_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["/bin/bash", "-c", "daphne -b 0.0.0.0 -p {{ _eda_daphne_port }} aap_eda.asgi:application"]
+          envFrom: [{configMapRef: {name: {{ _name }}-eda-config}}]
+          env:
+{{ db_env() }}
+          resources:
+            requests: {cpu: 50m, memory: 200Mi}
+        - name: web
+          image: {{ _eda_web_image }}
+          imagePullPolicy: {{ image_pull_policy | default('IfNotPresent') }}
+          ports: [{containerPort: {{ _eda_web_port }}}]
+          volumeMounts:
+            - {name: nginx, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf}
+            - {name: tmp, mountPath: /tmp}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+      volumes:
+        - name: nginx
+          configMap: {name: {{ _name }}-eda-nginx}
+        - name: tmp
+          emptyDir: {}
+{% for w in [('default-worker', 'aap_eda.core.tasking.DefaultWorker'), ('activation-worker', 'aap_eda.core.tasking.ActivationWorker')] %}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ _name }}-eda-{{ w[0] }}
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+    app.kubernetes.io/name: {{ _name }}-eda-{{ w[0] }}
+spec:
+  replicas: {{ eda.worker_replicas | default(1) }}
+  selector:
+    matchLabels: {app.kubernetes.io/name: {{ _name }}-eda-{{ w[0] }}}
+  template:
+    metadata:
+      labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(8, True) }}
+        app.kubernetes.io/name: {{ _name }}-eda-{{ w[0] }}
+    spec:
+      initContainers:
+        - name: wait-for-migrations
+          image: {{ _eda_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["/bin/bash", "-c", "until aap-eda-manage migrate --check >/dev/null 2>&1; do echo waiting for the schema; sleep 5; done"]
+          envFrom: [{configMapRef: {name: {{ _name }}-eda-config}}]
+          env:
+{{ db_env() }}
+      containers:
+        - name: worker
+          image: {{ _eda_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["/bin/bash", "-c", "aap-eda-manage rqworker --worker-class {{ w[1] }}"]
+          envFrom: [{configMapRef: {name: {{ _name }}-eda-config}}]
+          env:
+{{ db_env() }}
+          resources:
+            requests: {cpu: 25m, memory: 150Mi}
+{% endfor %}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ _name }}-eda-scheduler
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+    app.kubernetes.io/name: {{ _name }}-eda-scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: {{ _name }}-eda-scheduler}
+  template:
+    metadata:
+      labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(8, True) }}
+        app.kubernetes.io/name: {{ _name }}-eda-scheduler
+    spec:
+      initContainers:
+        - name: wait-for-migrations
+          image: {{ _eda_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["/bin/bash", "-c", "until aap-eda-manage migrate --check >/dev/null 2>&1; do echo waiting for the schema; sleep 5; done"]
+          envFrom: [{configMapRef: {name: {{ _name }}-eda-config}}]
+          env:
+{{ db_env() }}
+      containers:
+        - name: scheduler
+          image: {{ _eda_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["/bin/bash", "-c", "aap-eda-manage scheduler"]
+          envFrom: [{configMapRef: {name: {{ _name }}-eda-config}}]
+          env:
+{{ db_env() }}
+          resources:
+            requests: {cpu: 50m, memory: 256Mi}
