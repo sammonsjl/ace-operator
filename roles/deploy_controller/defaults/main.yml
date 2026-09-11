@@ -11,3 +11,18 @@ _ctl_settings_dir: /etc/tower/conf.d
 # Same image the shared cache uses. Declared here too because role defaults
 # are role-scoped, and this role must not depend on the redis role having run.
 _redis_image: docker.io/library/redis:7
+
+# The one-time setup the migration Job runs. Kept here rather than inline in
+# the template so the Job's name can be keyed to a hash of it: a Job's spec is
+# immutable, so changing these commands has to produce a different Job rather
+# than a failed patch of the old one.
+_ctl_migration_commands:
+  - awx-manage migrate --noinput
+  # Puts the Default organization and the demo objects in place. Re-runnable.
+  - awx-manage create_preload_data
+  - awx-manage register_default_execution_environments
+  # Without a queue the control instance reports no capacity and jobs sit in
+  # pending forever -- it registers itself on startup, but nothing places it
+  # in an instance group.
+  - awx-manage register_queue --queuename=controlplane --instance_percent=100
+  - awx-manage register_queue --queuename=default --instance_percent=100

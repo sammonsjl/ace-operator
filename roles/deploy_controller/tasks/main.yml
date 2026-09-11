@@ -107,6 +107,15 @@
   loop_control:
     label: "{{ item.kind }}/{{ item.metadata.name }}"
 
+# A Job's spec is immutable. Naming it after the controller image alone meant
+# changing what the migration runs produced a patch of the existing Job and a
+# failed reconcile; hashing the commands in makes a changed command a new Job.
+- name: Name the migration Job after what it runs
+  ansible.builtin.set_fact:
+    _ctl_migration_name: >-
+      {{ _name }}-controller-migration-{{ _controller_image | regex_replace('^.*:', '') }}-{{
+         (_ctl_migration_commands | join('\n')) | hash('sha1') | truncate(8, true, '') }}
+
 - name: Run the database migrations
   kubernetes.core.k8s:
     state: present
@@ -116,7 +125,7 @@
   kubernetes.core.k8s_info:
     kind: Job
     namespace: "{{ _namespace }}"
-    name: "{{ _name }}-controller-migration-{{ _controller_image | regex_replace('^.*:', '') }}"
+    name: "{{ _ctl_migration_name }}"
   register: _ctl_migration
   until: (_ctl_migration.resources[0].status.succeeded | default(0)) | int > 0
   retries: 60

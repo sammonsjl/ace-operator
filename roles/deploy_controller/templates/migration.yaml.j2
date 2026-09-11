@@ -6,12 +6,14 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ _name }}-controller-migration-{{ _controller_image | regex_replace('^.*:', '') }}
+  name: {{ _ctl_migration_name }}
   namespace: {{ _namespace }}
   labels:
 {{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
 spec:
   backoffLimit: 6
+  # Old migration Jobs are keyed by content hash, so they accumulate.
+  ttlSecondsAfterFinished: 86400
   template:
     metadata:
       labels:
@@ -27,16 +29,9 @@ spec:
           args:
             - |
               set -e
-              awx-manage migrate --noinput
-              # create_preload_data is what puts the Default organization and
-              # the demo objects in place; it is safe to re-run.
-              awx-manage create_preload_data
-              awx-manage register_default_execution_environments
-              # Without a queue the control instance has no capacity and jobs
-              # sit in pending forever -- the instance registers itself on
-              # startup, but nothing puts it in an instance group.
-              awx-manage register_queue --queuename=controlplane --instance_percent=100 || true
-              awx-manage register_queue --queuename=default --instance_percent=100 || true
+{% for cmd in _ctl_migration_commands %}
+              {{ cmd }}
+{% endfor %}
           env:
 {{ c.db_env() }}
           volumeMounts:
