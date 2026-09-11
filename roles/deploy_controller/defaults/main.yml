@@ -2,7 +2,6 @@
 # Ports the controller's own processes listen on. 8052 is uwsgi behind the
 # component's nginx, which is what the gateway's service node points at.
 _ctl_web_port: 8052
-_ctl_receptor_port: 27199
 
 # AWX writes its Django settings into /etc/tower/conf.d and reads SECRET_KEY
 # from a file. Both paths are the image's, not ours to choose.

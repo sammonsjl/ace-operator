@@ -73,6 +73,17 @@ data:
 
   receptor.conf: |
     ---
+    # local-only, with no listener. There is no mesh here: jobs run as pods in
+    # this cluster through the kubernetes work types below, not on remote
+    # execution nodes.
+    #
+    # This is not cosmetic. AWX gates its lost-instance reaper on receptor
+    # having a routing table, and a node that listens but peers with nobody
+    # reports an empty one -- so the task log fills with
+    #   Mesh stability gate: routing table empty, deferring peer-judgment
+    # every 60s and instances from replaced pods are never deprovisioned,
+    # leaving dead pods advertising capacity the scheduler will try to use.
+    - local-only: null
     - node:
         id: HOSTNAME
     - log-level: {{ controller.receptor_log_level | default('info') }}
@@ -104,5 +115,3 @@ data:
         allowruntimeauth: true
         allowruntimepod: true
         allowruntimeparams: true
-    - tcp-listener:
-        port: {{ _ctl_receptor_port }}
