@@ -85,10 +85,14 @@ spec:
           imagePullPolicy: {{ image_pull_policy | default('Always') }}
           args: ["--config", "/etc/receptor/receptor.conf"]
           command: ["receptor"]
+          # Deliberately no /tmp here. Sharing one emptyDir with the task
+          # container meant receptor created the job work directories first,
+          # as a different uid, and AWX then could not write its own results:
+          #   PermissionError: '/tmp/awx_4_.../artifacts/4/command'
+          # The two communicate over the receptor socket, not the filesystem.
           volumeMounts:
             - {name: receptor-etc, mountPath: /etc/receptor}
             - {name: receptor-socket, mountPath: /var/run/receptor}
-            - {name: tmp, mountPath: /tmp}
           resources:
             requests: {cpu: 50m, memory: 128Mi}
         - name: rsyslog
