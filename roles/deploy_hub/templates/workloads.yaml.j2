@@ -117,6 +117,16 @@ spec:
         app.kubernetes.io/name: {{ _name }}-hub-{{ w[0] }}
     spec:
       initContainers:
+        # pulp expects its working directories to exist on the shared volume.
+        # A freshly provisioned PVC is empty, and the API refuses to start:
+        #   (files.E001) The FILE_UPLOAD_TEMP_DIR setting refers to the
+        #   nonexistent directory '/var/lib/pulp/tmp'
+        - name: init-dirs
+          image: {{ _hub_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["sh", "-c", "mkdir -p /var/lib/pulp/tmp /var/lib/pulp/media /var/lib/pulp/assets"]
+          volumeMounts:
+            - {name: file-storage, mountPath: /var/lib/pulp}
 {% if w[0] == 'api' %}
         # The API tier owns the schema. Only one tier may migrate, or three
         # replicas race each other through the same migrations.

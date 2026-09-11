@@ -19,9 +19,12 @@ spec:
 {{ _labels | to_nice_yaml(indent=2) | indent(8, True) }}
         app.kubernetes.io/name: {{ _name }}-controller-web
       annotations:
-        # Roll the pods when settings change. Django reads them once at
-        # startup, so a rewritten ConfigMap under a running pod does nothing.
+        # Roll the pods when configuration changes. Django reads settings once
+        # at startup, and every one of these is mounted with subPath, which
+        # kubelet never updates in place -- a corrected receptor.conf sat in
+        # the ConfigMap while the container kept crashing on the old one.
         ace.io/settings-checksum: "{{ lookup('template', 'settings.yaml.j2') | hash('sha1') }}"
+        ace.io/config-checksum: "{{ lookup('template', 'configmaps.yaml.j2') | hash('sha1') }}"
     spec:
       serviceAccountName: {{ _name }}-controller
       containers:
