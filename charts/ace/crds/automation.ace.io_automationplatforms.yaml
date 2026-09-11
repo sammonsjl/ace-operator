@@ -1,0 +1,134 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: automationplatforms.automation.ace.io
+spec:
+  group: automation.ace.io
+  names:
+    kind: AutomationPlatform
+    listKind: AutomationPlatformList
+    plural: automationplatforms
+    singular: automationplatform
+    shortNames: [aceplatform, acep]
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      additionalPrinterColumns:
+        - name: Status
+          type: string
+          jsonPath: .status.phase
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              properties:
+                image_pull_policy:
+                  type: string
+                  enum: [Always, IfNotPresent, Never]
+                  # Always, because the default tags float. With IfNotPresent a
+                  # node keeps whatever :latest meant the first time it pulled,
+                  # so a rebuilt image never reaches a running platform and the
+                  # old one keeps failing in exactly the way you just fixed.
+                  # Pin a dated tag and IfNotPresent becomes the better choice.
+                  default: Always
+                admin_user:
+                  type: string
+                  default: admin
+                admin_password_secret:
+                  type: string
+                  description: >-
+                    Secret holding the admin password. Generated if unset.
+
+                # Each component is enabled independently. Disabled components
+                # are never rendered, and the gateway is never asked to issue
+                # them a service secret.
+                controller:
+                  type: object
+                  properties:
+                    enabled: {type: boolean, default: true}
+                    image: {type: string}
+                    replicas: {type: integer, default: 1}
+                    extra_settings:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          setting: {type: string}
+                          value: {type: string}
+                hub:
+                  type: object
+                  properties:
+                    enabled: {type: boolean, default: true}
+                    image: {type: string}
+                    replicas: {type: integer, default: 1}
+                    storage_class:
+                      type: string
+                      description: >-
+                        Must support ReadWriteMany: pulp shares one artifact
+                        volume across api, content and worker.
+                      default: nfs-csi
+                    storage_size: {type: string, default: 20Gi}
+                eda:
+                  type: object
+                  properties:
+                    enabled: {type: boolean, default: true}
+                    image: {type: string}
+                    replicas: {type: integer, default: 1}
+
+                gateway:
+                  type: object
+                  properties:
+                    image: {type: string}
+                    replicas: {type: integer, default: 1}
+                    external_url:
+                      type: string
+                      description: >-
+                        URL browsers reach the platform on. Every component's
+                        JWT audience and redirect config derives from it, and
+                        the gateway's TLS certificate gains it as a SAN.
+                    service_type:
+                      type: string
+                      default: ClusterIP
+                      enum: [ClusterIP, NodePort, LoadBalancer]
+                      description: >-
+                        Service type for the front door. envoy terminates TLS
+                        on 443 itself, so LoadBalancer gives it a real address
+                        rather than an HTTP proxy in front of it.
+                    service_annotations:
+                      type: object
+                      additionalProperties: {type: string}
+                      description: >-
+                        Annotations on the gateway Service, for whatever
+                        watches Services -- with external-dns that is
+                        external-dns.alpha.kubernetes.io/hostname.
+                ee_image:
+                  type: string
+                  description: Execution environment jobs run in.
+                de_image:
+                  type: string
+                  description: Decision environment EDA rulebooks run in.
+
+                postgres:
+                  type: object
+                  properties:
+                    managed: {type: boolean, default: true}
+                    host: {type: string}
+                    port: {type: integer, default: 5432}
+                    storage_size: {type: string, default: 20Gi}
+                redis:
+                  type: object
+                  properties:
+                    managed: {type: boolean, default: true}
+            status:
+              type: object
+              x-kubernetes-preserve-unknown-fields: true

@@ -1,0 +1,47 @@
+name: chart
+
+on:
+  push:
+    paths: ["charts/**", "config/**", ".github/workflows/chart.yml"]
+  pull_request:
+    paths: ["charts/**", "config/**"]
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Kustomize will not read outside its own root, so the chart cannot share
+      # the base's CRD file. Two copies exist; this is what stops them drifting.
+      - name: The CRD copies must be identical
+        run: |
+          diff -u config/crd/automation.ace.io_automationplatforms.yaml \
+                  charts/ace/crds/automation.ace.io_automationplatforms.yaml
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v3.16.3
+
+      - name: Fetch the awx-operator dependency
+        run: helm dependency build charts/ace
+
+      - name: Lint
+        run: helm lint charts/ace
+
+      # Rendering with the platform off is the default path; rendering it on is
+      # where the templating actually does work, so both are exercised.
+      - name: Render, operator only
+        run: helm template ace charts/ace -n ace-system > /dev/null
+
+      - name: Render, with a platform
+        run: |
+          helm template ace charts/ace -n ace-system \
+            --set platform.create=true \
+            --set platform.gateway.external_url=https://ace.example.com \
+            --set platform.gateway.service_type=LoadBalancer > /tmp/out.yaml
+          grep -q 'kind: AutomationPlatform' /tmp/out.yaml
+
+      - name: The kustomize base still builds
+        run: kubectl kustomize config > /dev/null

@@ -1,0 +1,74 @@
+# The operator that reconciles AutomationPlatform.
+operator:
+  image:
+    repository: ghcr.io/sammonsjl/ace-operator
+    # Immutable tags, not :latest. A floating tag plus a node that has already
+    # cached it means a rebuilt image never reaches the pod, and the old code
+    # keeps failing in a way that looks like the fix did not work.
+    tag: "20260911-4e91a81"
+    pullPolicy: Always
+  replicas: 1
+  # Empty watches every namespace.
+  watchNamespace: ""
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {memory: 1Gi}
+  nodeSelector: {}
+  tolerations: []
+
+# NOTE: the CRD ships in crds/, which Helm installs on first install and then
+# never touches again -- `helm upgrade` will not update it. After a chart
+# upgrade that changes the schema, apply it by hand:
+#   kubectl apply -f charts/ace/crds/
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  name: ace-operator
+
+# The upstream awx-operator chart, pulled in as a dependency. It reconciles
+# the AWX custom resource the platform renders for its controller.
+awx-operator:
+  enabled: true
+
+# Render an AutomationPlatform alongside the operator. Off by default: the
+# operator and the platform have different lifecycles, and most people want to
+# install the operator once and manage platforms separately.
+platform:
+  create: false
+  name: ace
+  namespace: ace
+
+  gateway:
+    external_url: ""
+    replicas: 1
+    # ClusterIP keeps the platform in-cluster. envoy terminates TLS on 443
+    # itself, so LoadBalancer gives the front door its own address rather than
+    # putting an HTTP proxy in front of it.
+    service_type: ClusterIP
+    service_annotations: {}
+    image: ""
+
+  controller:
+    enabled: true
+    replicas: 1
+    image: ""
+  hub:
+    enabled: true
+    replicas: 1
+    image: ""
+  eda:
+    enabled: true
+    replicas: 1
+    image: ""
+
+  # Execution and decision environments jobs and rulebooks run in.
+  ee_image: ""
+  de_image: ""
+
+  postgres:
+    managed: true
+    storage_size: 20Gi
+  redis:
+    managed: true

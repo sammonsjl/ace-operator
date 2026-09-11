@@ -1,0 +1,6 @@
+dependencies:
+- name: awx-operator
+  repository: https://ansible-community.github.io/awx-operator-helm/
+  version: 3.2.1
+digest: sha256:566b991b03d3cbccb1063d05336296fc1b11176088ccfc14c934615acb6d3f44
+generated: "2026-09-11T08:43:45.785564307-05:00"

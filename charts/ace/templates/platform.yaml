@@ -1,0 +1,44 @@
+{{- if .Values.platform.create }}
+{{- $p := .Values.platform }}
+apiVersion: automation.ace.io/v1alpha1
+kind: AutomationPlatform
+metadata:
+  name: {{ $p.name }}
+  namespace: {{ $p.namespace | default .Release.Namespace }}
+  labels:
+    {{- include "ace.labels" . | nindent 4 }}
+spec:
+  gateway:
+    replicas: {{ $p.gateway.replicas }}
+    {{- with $p.gateway.external_url }}
+    external_url: {{ . | quote }}
+    {{- end }}
+    service_type: {{ $p.gateway.service_type }}
+    {{- with $p.gateway.service_annotations }}
+    service_annotations:
+      {{- toYaml . | nindent 6 }}
+    {{- end }}
+    {{- with $p.gateway.image }}
+    image: {{ . | quote }}
+    {{- end }}
+{{- range $name := (list "controller" "hub" "eda") }}
+{{- $c := index $p $name }}
+  {{ $name }}:
+    enabled: {{ $c.enabled }}
+    replicas: {{ $c.replicas }}
+    {{- with $c.image }}
+    image: {{ . | quote }}
+    {{- end }}
+{{- end }}
+  {{- with $p.ee_image }}
+  ee_image: {{ . | quote }}
+  {{- end }}
+  {{- with $p.de_image }}
+  de_image: {{ . | quote }}
+  {{- end }}
+  postgres:
+    managed: {{ $p.postgres.managed }}
+    storage_size: {{ $p.postgres.storage_size }}
+  redis:
+    managed: {{ $p.redis.managed }}
+{{- end }}

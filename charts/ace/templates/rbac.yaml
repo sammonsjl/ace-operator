@@ -1,0 +1,101 @@
+{{- if .Values.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ace.fullname" . }}
+  labels:
+    {{- include "ace.labels" . | nindent 4 }}
+# These are the operator's own permissions, and they are wider than they look
+# because it creates the component operators' custom resources and patches the
+# NetworkPolicies galaxy-operator installs.
+rules:
+  - apiGroups:
+    - automation.ace.io
+    resources:
+    - automationplatforms
+    - automationplatforms/status
+    - automationplatforms/finalizers
+    verbs:
+    - '*'
+  - apiGroups:
+    - ''
+    resources:
+    - secrets
+    - configmaps
+    - services
+    - persistentvolumeclaims
+    - serviceaccounts
+    verbs:
+    - '*'
+  - apiGroups:
+    - ''
+    resources:
+    - pods
+    verbs:
+    - get
+    - list
+    - watch
+  - apiGroups:
+    - ''
+    resources:
+    - pods/exec
+    verbs:
+    - create
+    - get
+  - apiGroups:
+    - apps
+    resources:
+    - deployments
+    - statefulsets
+    verbs:
+    - '*'
+  - apiGroups:
+    - awx.ansible.com
+    - galaxy.ansible.com
+    - eda.ansible.com
+    resources:
+    - '*'
+    verbs:
+    - '*'
+  - apiGroups:
+    - networking.k8s.io
+    resources:
+    - ingresses
+    - networkpolicies
+    verbs:
+    - '*'
+  - apiGroups:
+    - coordination.k8s.io
+    resources:
+    - leases
+    verbs:
+    - get
+    - list
+    - watch
+    - create
+    - update
+    - patch
+    - delete
+  - apiGroups:
+    - ''
+    resources:
+    - events
+    verbs:
+    - create
+    - patch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "ace.fullname" . }}
+  labels:
+    {{- include "ace.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "ace.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "ace.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}

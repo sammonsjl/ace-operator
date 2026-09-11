@@ -6,6 +6,9 @@ apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - namespace.yaml
+  # Kustomize refuses to read outside its own root, so this cannot point at
+  # the chart's copy in charts/ace/crds/. The two are kept identical by a CI
+  # check rather than by sharing a file.
   - crd/automation.ace.io_automationplatforms.yaml
   - rbac/role.yaml
   - manager.yaml

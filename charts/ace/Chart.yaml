@@ -1,0 +1,29 @@
+apiVersion: v2
+name: ace
+description: >-
+  ACE -- an open automation platform: a gateway front door with a controller,
+  content hub and event-driven automation behind it, all built from source
+  rather than vendor images.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/sammonsjl/ace-operator
+sources:
+  - https://github.com/sammonsjl/ace-operator
+  - https://github.com/sammonsjl/ace-images
+keywords: [automation, ansible, awx, galaxy, eda]
+
+# The controller is reconciled by the upstream awx-operator, which is the one
+# of the three component operators that publishes a Helm chart -- and the only
+# one that is Apache-2.0, so patterns may be borrowed from it directly.
+#
+# galaxy-operator and eda-server-operator ship kustomize bases rather than
+# charts, and are GPLv2+. Creating their custom resources is ordinary API use
+# and carries no licence obligation; vendoring their manifests into this
+# Apache-2.0 chart would not be. They are installed alongside, and
+# components.hub/eda simply expect them to be present.
+dependencies:
+  - name: awx-operator
+    version: "3.x"
+    repository: https://ansible-community.github.io/awx-operator-helm/
+    condition: awx-operator.enabled
