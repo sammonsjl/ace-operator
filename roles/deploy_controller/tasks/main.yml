@@ -168,3 +168,50 @@
     - "{{ lookup('template', 'task.yaml.j2') | from_yaml }}"
   loop_control:
     label: "{{ item.metadata.name }}"
+
+# AWX will not do this itself here. Its lost-instance reaper is gated on
+# receptor reporting a non-empty routing table, and a single-node deployment
+# with no mesh never has one -- the task log just repeats
+#   Mesh stability gate: routing table empty, deferring peer-judgment
+# once a minute. Instances from replaced pods therefore stay registered,
+# advertising the capacity of a pod that no longer exists, and the scheduler
+# will hand control work to them.
+#
+# The operator knows exactly which task pods exist, so it can settle this
+# without guessing.
+- name: Find the task pods that actually exist
+  kubernetes.core.k8s_info:
+    kind: Pod
+    namespace: "{{ _namespace }}"
+    label_selectors:
+      - "app.kubernetes.io/name={{ _name }}-controller-task"
+  register: _ctl_pods
+
+- name: Ask the controller which instances it has registered
+  ansible.builtin.uri:
+    url: "http://{{ _name }}-controller-service.{{ _namespace }}.svc/api/v2/instances/?page_size=200"
+    user: "{{ admin_user | default('admin') }}"
+    password: "{{ _admin_password }}"
+    force_basic_auth: true
+    return_content: true
+  register: _ctl_instances
+  failed_when: false
+  no_log: true
+
+- name: Work out which of them are gone
+  ansible.builtin.set_fact:
+    _ctl_stale: >-
+      {{ (_ctl_instances.json.results | default([]) | map(attribute='hostname') | list)
+         | difference(_ctl_pods.resources | map(attribute='metadata.name') | list) }}
+
+- name: Deprovision the instances whose pods are gone
+  kubernetes.core.k8s_exec:
+    namespace: "{{ _namespace }}"
+    pod: "{{ (_ctl_pods.resources | selectattr('status.phase', 'equalto', 'Running') | list | first).metadata.name }}"
+    container: task
+    command: awx-manage deprovision_instance --hostname={{ item }}
+  loop: "{{ _ctl_stale }}"
+  when:
+    - _ctl_stale | length > 0
+    - _ctl_pods.resources | selectattr('status.phase', 'equalto', 'Running') | list | length > 0
+  failed_when: false
