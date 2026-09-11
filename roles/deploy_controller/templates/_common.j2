@@ -43,6 +43,12 @@
         # under /var are not writable by the uid these run as.
         - name: tmp
           emptyDir: {}
+        # The synced git checkouts. Shared between the task container, which
+        # writes them, and receptor, which reads them when bundling work for a
+        # container-group job -- without that the job pod gets an empty project
+        # and ansible-playbook reports the playbook could not be found.
+        - name: projects
+          emptyDir: {}
 {% endmacro %}
 {% macro redis_sidecar() %}
         - name: redis

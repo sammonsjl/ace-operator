@@ -27,6 +27,10 @@ spec:
         ace.io/config-checksum: "{{ lookup('template', 'configmaps.yaml.j2') | hash('sha1') }}"
     spec:
       serviceAccountName: {{ _name }}-controller
+      # The task and receptor containers share the projects directory and run
+      # as different users; a common fsGroup is what makes it writable by both.
+      securityContext:
+        fsGroup: 1000
       initContainers:
         # Waits for the migration Job's schema rather than racing it. The task
         # pod will happily start against a half-migrated database and then
@@ -75,6 +79,7 @@ spec:
 {{ c.app_mounts() }}
             - {name: receptor-etc, mountPath: /etc/receptor}
             - {name: receptor-socket, mountPath: /var/run/receptor}
+            - {name: projects, mountPath: /var/lib/awx/projects}
             - {name: tmp, mountPath: /tmp}
           resources:
             {{ controller.task_resources | default({'requests': {'cpu': '100m', 'memory': '512Mi'}}) | to_json }}
@@ -93,6 +98,7 @@ spec:
           volumeMounts:
             - {name: receptor-etc, mountPath: /etc/receptor}
             - {name: receptor-socket, mountPath: /var/run/receptor}
+            - {name: projects, mountPath: /var/lib/awx/projects}
           resources:
             requests: {cpu: 50m, memory: 128Mi}
         - name: rsyslog
