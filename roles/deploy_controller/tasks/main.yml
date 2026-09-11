@@ -189,20 +189,34 @@
       - status.phase=Running
   register: _ctl_pods
 
-# Done inside the pod with awx-manage rather than over the controller's API:
-# the platform delegates authentication to the gateway, so the component has
-# no local password of its own to authenticate with.
-- name: Deprovision instances whose pods are gone
+# Asked of awx-manage rather than the controller's REST API: the platform
+# delegates authentication to the gateway, so the component has no local
+# password to authenticate with and the API call returned nothing.
+- name: Ask the controller which instances it has registered
   kubernetes.core.k8s_exec:
     namespace: "{{ _namespace }}"
     pod: "{{ _ctl_pods.resources[0].metadata.name }}"
     container: task
-    command: >-
-      bash -c 'live="{{ _ctl_pods.resources | map(attribute='"'"'metadata.name'"'"') | join(" ") }}";
-      for h in $(awx-manage list_instances 2>/dev/null | grep -oE "{{ _name }}-controller-task-[a-z0-9-]+" | sort -u); do
-        case " $live " in *" $h "*) ;; *) awx-manage deprovision_instance --hostname="$h" ;; esac
-      done'
+    command: awx-manage list_instances
+  register: _ctl_list
   when: _ctl_pods.resources | length > 0
-  register: _ctl_reap
-  changed_when: "'Instance Removed' in (_ctl_reap.stdout | default(''))"
+  failed_when: false
+  changed_when: false
+
+- name: Work out which instances no longer have a pod
+  ansible.builtin.set_fact:
+    _ctl_stale: >-
+      {{ (_ctl_list.stdout | default('') | regex_findall(_name ~ '-controller-task-[a-z0-9-]+') | unique)
+         | difference(_ctl_pods.resources | map(attribute='metadata.name') | list) }}
+
+# Left registered, a replaced pod keeps advertising its capacity and the
+# scheduler will hand control work to something that no longer exists.
+- name: Deprovision them
+  kubernetes.core.k8s_exec:
+    namespace: "{{ _namespace }}"
+    pod: "{{ _ctl_pods.resources[0].metadata.name }}"
+    container: task
+    command: "awx-manage deprovision_instance --hostname={{ item }}"
+  loop: "{{ _ctl_stale | default([]) }}"
+  when: _ctl_pods.resources | length > 0
   failed_when: false
