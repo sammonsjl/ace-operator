@@ -5,32 +5,23 @@ Installs the ACE operator, and optionally a platform for it to reconcile.
 ## What it installs
 
 - The `AutomationPlatform` CRD, the operator's RBAC, and the operator itself.
-- **awx-operator**, as a chart dependency, which reconciles the `AWX` resource
-  ACE renders for its controller.
 - Optionally an `AutomationPlatform` resource (`platform.create=true`).
 
-## What it does not install
+That is the whole list. ACE deploys the controller, hub and EDA itself, so
+nothing else has to be installed first. Earlier versions rendered an `AWX`, a
+`Galaxy` and an `EDA` custom resource and required awx-operator,
+galaxy-operator and eda-server-operator to be present to reconcile them; none
+of those are needed now.
 
-`galaxy-operator` and `eda-server-operator` are **not** dependencies, because
-neither publishes a Helm chart -- both ship kustomize bases. They are also
-GPLv2+, while this chart is Apache-2.0: creating their custom resources is
-ordinary API use and carries no licence obligation, but vendoring their
-manifests here would not be so simple.
-
-Install them separately before enabling `platform.hub` or `platform.eda`:
-
-```sh
-kubectl apply -k https://github.com/ansible/galaxy-operator/config/default?ref=2024.5.8
-kubectl apply -k https://github.com/ansible/eda-server-operator/config/default?ref=1.0.2
-```
-
-Both watch only their own namespace, so they must be installed into whichever
-namespace the platform lives in.
+Owning the Deployments also means every image is one we build. The hand-off
+design left three upstream images in the platform that were never ours to
+choose -- `quay.io/ansible/awx-ee` as the controller's receptor sidecar,
+`quay.io/ansible/galaxy-ui` and `quay.io/ansible/eda-ui` as web tiers that only
+ever ran nginx.
 
 ## Usage
 
 ```sh
-helm dependency build charts/ace
 helm install ace charts/ace -n ace-system --create-namespace
 ```
 

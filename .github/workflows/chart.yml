@@ -24,15 +24,6 @@ jobs:
         with:
           version: v3.16.3
 
-      # `helm dependency build` resolves an unmanaged repository locally but
-      # not on a clean runner, where it fails with "no repository definition
-      # for ...", so the repo is registered explicitly first.
-      - name: Fetch the awx-operator dependency
-        run: |
-          helm repo add awx-operator https://ansible-community.github.io/awx-operator-helm/
-          helm repo update
-          helm dependency build charts/ace
-
       - name: Lint
         run: helm lint charts/ace
 

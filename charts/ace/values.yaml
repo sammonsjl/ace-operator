@@ -27,11 +27,6 @@ serviceAccount:
   create: true
   name: ace-operator
 
-# The upstream awx-operator chart, pulled in as a dependency. It reconciles
-# the AWX custom resource the platform renders for its controller.
-awx-operator:
-  enabled: true
-
 # Render an AutomationPlatform alongside the operator. Off by default: the
 # operator and the platform have different lifecycles, and most people want to
 # install the operator once and manage platforms separately.
