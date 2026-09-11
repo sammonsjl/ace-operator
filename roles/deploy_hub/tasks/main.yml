@@ -1,0 +1,133 @@
+---
+# The hub, deployed directly rather than through galaxy-operator. Those
+# manifests were read as a behavioural spec only -- galaxy-operator is GPLv2+
+# and this repo is Apache-2.0, so what is mirrored here is the shape of the
+# resources it produced, written from scratch.
+
+- name: Read the hub's database connection
+  kubernetes.core.k8s_info:
+    kind: Secret
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-hub-pg"
+  register: _hub_pg_secret
+  no_log: true
+
+- name: Fail early if the database secret is missing
+  ansible.builtin.fail:
+    msg: >-
+      {{ _name }}-hub-pg does not exist. The postgres role creates it; the hub
+      cannot be configured without it.
+  when: _hub_pg_secret.resources | length == 0
+
+- name: Keep the connection details for the settings template
+  ansible.builtin.set_fact:
+    _hub_pg: >-
+      {{ dict(_hub_pg_secret.resources[0].data | dict2items
+              | map(attribute='key') | list
+              | zip(_hub_pg_secret.resources[0].data | dict2items
+                    | map(attribute='value') | map('b64decode') | list)) }}
+  no_log: true
+
+- name: Create the hub's Django secret key, only if it does not exist
+  block:
+    - name: Look for an existing key
+      kubernetes.core.k8s_info:
+        kind: Secret
+        namespace: "{{ _namespace }}"
+        name: "{{ _name }}-hub-secret-key"
+      register: _hub_key
+
+    - name: Generate one
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ _name }}-hub-secret-key"
+            namespace: "{{ _namespace }}"
+            labels: "{{ _labels }}"
+          stringData:
+            secret_key: "{{ lookup('password', '/dev/null length=50 chars=ascii_letters,digits') }}"
+      when: _hub_key.resources | length == 0
+      no_log: true
+
+    - name: Read it back
+      kubernetes.core.k8s_info:
+        kind: Secret
+        namespace: "{{ _namespace }}"
+        name: "{{ _name }}-hub-secret-key"
+      register: _hub_key_final
+      no_log: true
+
+- name: Keep the secret key for the settings template
+  ansible.builtin.set_fact:
+    _hub_secret_key: "{{ _hub_key_final.resources[0].data.secret_key | b64decode }}"
+  no_log: true
+
+# pulp signs container-registry tokens with an ES256 keypair and names both
+# halves in its settings, so it must exist before the API starts. galaxy-operator
+# used to generate it; nothing else does now.
+- name: Create the container-registry signing keypair, only if it does not exist
+  block:
+    - name: Look for an existing keypair
+      kubernetes.core.k8s_info:
+        kind: Secret
+        namespace: "{{ _namespace }}"
+        name: "{{ _name }}-hub-container-auth"
+      register: _hub_auth
+
+    - name: Generate an EC private key
+      community.crypto.openssl_privatekey:
+        path: /tmp/container_auth_private_key.pem
+        type: ECC
+        curve: secp256r1
+      when: _hub_auth.resources | length == 0
+
+    - name: Derive its public half
+      community.crypto.openssl_publickey:
+        path: /tmp/container_auth_public_key.pem
+        privatekey_path: /tmp/container_auth_private_key.pem
+      when: _hub_auth.resources | length == 0
+
+    - name: Store the pair
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ _name }}-hub-container-auth"
+            namespace: "{{ _namespace }}"
+            labels: "{{ _labels }}"
+          data:
+            container_auth_private_key.pem: "{{ lookup('file', '/tmp/container_auth_private_key.pem') | b64encode }}"
+            container_auth_public_key.pem: "{{ lookup('file', '/tmp/container_auth_public_key.pem') | b64encode }}"
+      when: _hub_auth.resources | length == 0
+      no_log: true
+
+    - name: Remove the temporary keys
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: [/tmp/container_auth_private_key.pem, /tmp/container_auth_public_key.pem]
+      when: _hub_auth.resources | length == 0
+
+- name: Render the hub's settings and nginx config
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ item }}"
+  loop:
+    - "{{ lookup('template', 'settings.yaml.j2') | from_yaml }}"
+    - "{{ lookup('template', 'configmap.yaml.j2') | from_yaml }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+  no_log: true
+
+- name: Render the hub's storage, services and workloads
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ item }}"
+  loop: "{{ lookup('template', 'workloads.yaml.j2') | from_yaml_all | list }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"

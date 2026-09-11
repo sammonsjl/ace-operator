@@ -1,0 +1,51 @@
+---
+# pulp/galaxy_ng settings. Keys are read by dynaconf out of settings.py, so
+# values must be valid Python -- a JSON false here is a NameError at startup.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ _name }}-hub-server
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+stringData:
+  settings.py: |
+    GALAXY_API_PATH_PREFIX = "api/galaxy"
+    CACHE_ENABLED = True
+    DB_ENCRYPTION_KEY = "/etc/pulp/keys/database_fields.symmetric.key"
+    ANSIBLE_CERTS_DIR = "/etc/pulp/keys/"
+    STATIC_ROOT = "/app/galaxy_ng/app/static/"
+
+    DATABASES = {"default": {"HOST": "{{ _hub_pg.host }}", "ENGINE": "django.db.backends.postgresql",
+                 "NAME": "{{ _hub_pg.database }}", "USER": "{{ _hub_pg.username }}",
+                 "PASSWORD": "{{ _hub_pg.password }}", "PORT": {{ _hub_pg.port }},
+                 "CONN_MAX_AGE": 0,
+                 "OPTIONS": {"sslmode": "{{ _hub_pg.sslmode | default('prefer') }}", "sslrootcert": ""}}}
+
+    REDIS_HOST = "{{ _name }}-hub-redis-svc"
+    REDIS_PORT = {{ _hub_redis_port }}
+    REDIS_PASSWORD = ""
+
+    # Where pulp tells clients to fetch artifacts from. It must be a URL that
+    # resolves for them, which is the web tier rather than the API.
+    CONTENT_ORIGIN = "http://{{ _name }}-hub-web-svc.{{ _namespace }}.svc.cluster.local:{{ _hub_web_svc_port }}"
+    ANSIBLE_API_HOSTNAME = "http://{{ _name }}-hub-web-svc.{{ _namespace }}.svc.cluster.local:{{ _hub_web_svc_port }}"
+    X_PULP_CONTENT_HOST = "{{ _name }}-hub-content-svc"
+    X_PULP_CONTENT_PORT = "{{ _hub_content_port }}"
+
+    TOKEN_SERVER = "http://{{ _name }}-hub-web-svc.{{ _namespace }}.svc.cluster.local:{{ _hub_web_svc_port }}/token/"
+    TOKEN_AUTH_DISABLED = False
+    TOKEN_SIGNATURE_ALGORITHM = "ES256"
+    PUBLIC_KEY_PATH = "/etc/pulp/keys/container_auth_public_key.pem"
+    PRIVATE_KEY_PATH = "/etc/pulp/keys/container_auth_private_key.pem"
+
+    SECRET_KEY = "{{ _hub_secret_key }}"
+    CSRF_TRUSTED_ORIGINS = ["{{ _external_url }}"]
+
+    # The gateway owns identity: trust the JWTs it signs and resolve users
+    # against it. http to the internal Service, so there is no TLS to verify.
+    ANSIBLE_BASE_JWT_KEY = "{{ _gw_internal_url }}"
+    RESOURCE_SERVER = {"URL": "{{ _gw_internal_url }}", "SECRET_KEY": "{{ _service_secret_map['hub'] }}"}
+{% for s in hub.extra_settings | default([]) %}
+    {{ s.setting | upper }} = {{ s.value }}
+{% endfor %}

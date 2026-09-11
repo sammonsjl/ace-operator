@@ -1,0 +1,190 @@
+{%- macro pulp_env() %}
+            - {name: POSTGRES_SERVICE_HOST, value: "{{ _hub_pg.host }}"}
+            - {name: POSTGRES_SERVICE_PORT, value: "{{ _hub_pg.port }}"}
+            - {name: REDIS_SERVICE_HOST, value: "{{ _name }}-hub-redis-svc"}
+            - {name: REDIS_SERVICE_PORT, value: "{{ _hub_redis_port }}"}
+{%- endmacro %}
+{%- macro pulp_mounts() %}
+            - {name: settings, mountPath: /etc/pulp/settings.py, subPath: settings.py}
+            - {name: db-fields, mountPath: /etc/pulp/keys/database_fields.symmetric.key, subPath: database_fields.symmetric.key}
+            - {name: container-auth, mountPath: /etc/pulp/keys/container_auth_private_key.pem, subPath: container_auth_private_key.pem}
+            - {name: container-auth, mountPath: /etc/pulp/keys/container_auth_public_key.pem, subPath: container_auth_public_key.pem}
+            - {name: file-storage, mountPath: /var/lib/pulp}
+            - {name: tmp, mountPath: /tmp}
+{%- endmacro %}
+{%- macro pulp_volumes() %}
+        - name: settings
+          secret: {secretName: {{ _name }}-hub-server}
+        - name: db-fields
+          secret:
+            secretName: {{ _name }}-db-fields-encryption
+            items: [{key: database_fields.symmetric.key, path: database_fields.symmetric.key}]
+        - name: container-auth
+          secret: {secretName: {{ _name }}-hub-container-auth}
+        - name: file-storage
+          persistentVolumeClaim: {claimName: {{ _name }}-hub-file-storage}
+        - name: tmp
+          emptyDir: {}
+{%- endmacro %}
+---
+# Shared by api, content and the workers, so it must be ReadWriteMany: pulp
+# writes uploaded artifacts here and the content app serves them back.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ _name }}-hub-file-storage
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: {{ hub.storage_class | default('nfs-csi') }}
+  resources:
+    requests:
+      storage: {{ hub.storage_size | default('20Gi') }}
+{% for s in [('api', _hub_api_port), ('content', _hub_content_port), ('redis', _hub_redis_port)] %}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ _name }}-hub-{{ s[0] }}-svc
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ _name }}-hub-{{ s[0] }}
+  ports:
+    - {name: {{ s[0] }}, port: {{ s[1] }}, targetPort: {{ s[1] }}}
+{% endfor %}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ _name }}-hub-web-svc
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  selector:
+    app.kubernetes.io/name: {{ _name }}-hub-web
+  ports:
+    - {name: web, port: {{ _hub_web_svc_port }}, targetPort: {{ _hub_web_port }}}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ _name }}-hub-redis
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+    app.kubernetes.io/name: {{ _name }}-hub-redis
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: {{ _name }}-hub-redis}
+  template:
+    metadata:
+      labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(8, True) }}
+        app.kubernetes.io/name: {{ _name }}-hub-redis
+    spec:
+      containers:
+        - name: redis
+          image: {{ _redis_image }}
+          imagePullPolicy: {{ image_pull_policy | default('IfNotPresent') }}
+          ports: [{containerPort: {{ _hub_redis_port }}}]
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+{% for w in [('api', 'start-api', _hub_api_port), ('content', 'start-content-app', _hub_content_port), ('worker', 'start-worker', 0)] %}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ _name }}-hub-{{ w[0] }}
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+    app.kubernetes.io/name: {{ _name }}-hub-{{ w[0] }}
+spec:
+  replicas: {{ hub.replicas | default(1) }}
+  selector:
+    matchLabels: {app.kubernetes.io/name: {{ _name }}-hub-{{ w[0] }}}
+  template:
+    metadata:
+      labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(8, True) }}
+        app.kubernetes.io/name: {{ _name }}-hub-{{ w[0] }}
+    spec:
+      initContainers:
+{% if w[0] == 'api' %}
+        # The API tier owns the schema. Only one tier may migrate, or three
+        # replicas race each other through the same migrations.
+        - name: run-migrations
+          image: {{ _hub_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["sh", "-c"]
+          args: ["wait-for-postgres && pulpcore-manager migrate --noinput"]
+{% else %}
+        # Every other tier waits for it. The image ships this wrapper so the
+        # wait is the same one pulp performs internally.
+        - name: wait-for-migrations
+          image: {{ _hub_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          args: ["wait-for-migrations"]
+{% endif %}
+          env:
+{{ pulp_env() }}
+          volumeMounts:
+{{ pulp_mounts() }}
+      containers:
+        - name: {{ w[0] }}
+          image: {{ _hub_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          args: ["{{ w[1] }}"]
+{% if w[2] %}
+          ports: [{containerPort: {{ w[2] }}}]
+{% endif %}
+          env:
+{{ pulp_env() }}
+          volumeMounts:
+{{ pulp_mounts() }}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+      volumes:
+{{ pulp_volumes() }}
+{% endfor %}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ _name }}-hub-web
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+    app.kubernetes.io/name: {{ _name }}-hub-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app.kubernetes.io/name: {{ _name }}-hub-web}
+  template:
+    metadata:
+      labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(8, True) }}
+        app.kubernetes.io/name: {{ _name }}-hub-web
+    spec:
+      containers:
+        - name: web
+          image: {{ _hub_web_image }}
+          imagePullPolicy: {{ image_pull_policy | default('IfNotPresent') }}
+          ports: [{containerPort: {{ _hub_web_port }}}]
+          volumeMounts:
+            - {name: nginx, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf}
+            - {name: tmp, mountPath: /tmp}
+          resources:
+            requests: {cpu: 10m, memory: 32Mi}
+      volumes:
+        - name: nginx
+          configMap: {name: {{ _name }}-hub-nginx}
+        - name: tmp
+          emptyDir: {}

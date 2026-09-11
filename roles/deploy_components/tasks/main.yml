@@ -14,7 +14,8 @@
   when: controller.enabled | default(true)
 
 - name: Deploy the hub
-  ansible.builtin.include_tasks: hub.yml
+  ansible.builtin.include_role:
+    name: deploy_hub
   when: hub.enabled | default(true)
 
 - name: Deploy EDA
