@@ -1,0 +1,92 @@
+{% import '_common.j2' as c with context %}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ _name }}-controller-task
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+    app.kubernetes.io/name: {{ _name }}-controller-task
+spec:
+  replicas: {{ controller.replicas | default(1) }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ _name }}-controller-task
+  template:
+    metadata:
+      labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(8, True) }}
+        app.kubernetes.io/name: {{ _name }}-controller-task
+      annotations:
+        ace.io/settings-checksum: "{{ lookup('template', 'settings.yaml.j2') | hash('sha1') }}"
+    spec:
+      serviceAccountName: {{ _name }}-controller
+      initContainers:
+        # Waits for the migration Job's schema rather than racing it. The task
+        # pod will happily start against a half-migrated database and then
+        # fail in ways that look like application bugs.
+        - name: wait-for-migrations
+          image: {{ _controller_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              until awx-manage migrate --check >/dev/null 2>&1; do
+                echo "waiting for the database schema"; sleep 5
+              done
+          env:
+{{ c.db_env() }}
+          volumeMounts:
+{{ c.app_mounts() }}
+      containers:
+{{ c.redis_sidecar() }}
+        - name: task
+          image: {{ _controller_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          args: ["/usr/bin/launch_awx_task.sh"]
+          env:
+{{ c.db_env() }}
+            - name: SUPERVISOR_WEB_CONFIG_PATH
+              value: /etc/supervisord.conf
+            - name: AWX_SKIP_MIGRATIONS
+              value: "true"
+          volumeMounts:
+{{ c.app_mounts() }}
+            - {name: receptor-config, mountPath: /etc/receptor/receptor.conf, subPath: receptor.conf}
+            - {name: receptor-socket, mountPath: /var/run/receptor}
+            - {name: tmp, mountPath: /tmp}
+          resources:
+            {{ controller.task_resources | default({'requests': {'cpu': '100m', 'memory': '512Mi'}}) | to_json }}
+        # receptor, from our own execution environment rather than an upstream
+        # awx-ee: ace-ee-minimal carries the receptor binary for this reason.
+        - name: receptor
+          image: {{ _ee_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              sed "s/HOSTNAME/$HOSTNAME/g" /etc/receptor/receptor.conf > /tmp/receptor.conf
+              exec receptor --config /tmp/receptor.conf
+          volumeMounts:
+            - {name: receptor-config, mountPath: /etc/receptor/receptor.conf, subPath: receptor.conf}
+            - {name: receptor-socket, mountPath: /var/run/receptor}
+            - {name: tmp, mountPath: /tmp}
+          resources:
+            requests: {cpu: 50m, memory: 128Mi}
+        - name: rsyslog
+          image: {{ _controller_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          args: ["/usr/bin/launch_awx_rsyslog.sh"]
+          env:
+{{ c.db_env() }}
+          volumeMounts:
+{{ c.app_mounts() }}
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+      volumes:
+{{ c.volumes() }}
+        - name: receptor-config
+          configMap: {name: {{ _name }}-controller-config}
+        - name: receptor-socket
+          emptyDir: {}

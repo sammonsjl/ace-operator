@@ -1,0 +1,55 @@
+{#- Shared pieces for the controller's pods: the database environment, the
+    settings/secret mounts, and the volume set. Kept in one include so web,
+    task and the migration Job cannot drift apart. -#}
+{% macro db_env() %}
+            - name: DATABASE_HOST
+              valueFrom: {secretKeyRef: {name: {{ _name }}-controller-pg, key: host}}
+            - name: DATABASE_PORT
+              valueFrom: {secretKeyRef: {name: {{ _name }}-controller-pg, key: port}}
+            - name: DATABASE_NAME
+              valueFrom: {secretKeyRef: {name: {{ _name }}-controller-pg, key: database}}
+            - name: DATABASE_USER
+              valueFrom: {secretKeyRef: {name: {{ _name }}-controller-pg, key: username}}
+            - name: DATABASE_PASSWORD
+              valueFrom: {secretKeyRef: {name: {{ _name }}-controller-pg, key: password}}
+            - name: MY_POD_UID
+              valueFrom: {fieldRef: {fieldPath: metadata.uid}}
+{% endmacro %}
+{% macro app_mounts() %}
+            - {name: settings, mountPath: {{ _ctl_settings_dir }}/settings.py, subPath: settings.py}
+            - {name: secret-key, mountPath: /etc/tower/SECRET_KEY, subPath: SECRET_KEY}
+            - {name: redis-socket, mountPath: /var/run/redis}
+            - {name: rsyslog-socket, mountPath: /var/run/awx-rsyslog}
+{% endmacro %}
+{% macro volumes() %}
+        - name: settings
+          configMap: {name: {{ _name }}-controller-settings}
+        - name: config
+          configMap: {name: {{ _name }}-controller-config}
+        - name: secret-key
+          secret:
+            secretName: {{ _name }}-controller-secret-key
+            items: [{key: secret_key, path: SECRET_KEY}]
+        - name: redis-socket
+          emptyDir: {}
+        - name: redis-data
+          emptyDir: {}
+        - name: rsyslog-socket
+          emptyDir: {}
+        # nginx and uwsgi both need somewhere writable; the image's defaults
+        # under /var are not writable by the uid these run as.
+        - name: tmp
+          emptyDir: {}
+{% endmacro %}
+{% macro redis_sidecar() %}
+        - name: redis
+          image: {{ _redis_image }}
+          imagePullPolicy: {{ image_pull_policy | default('IfNotPresent') }}
+          args: [redis-server, /etc/redis.conf]
+          volumeMounts:
+            - {name: config, mountPath: /etc/redis.conf, subPath: redis.conf}
+            - {name: redis-socket, mountPath: /var/run/redis}
+            - {name: redis-data, mountPath: /data}
+          resources:
+            requests: {cpu: 10m, memory: 64Mi}
+{% endmacro %}

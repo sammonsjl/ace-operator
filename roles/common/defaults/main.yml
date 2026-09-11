@@ -45,6 +45,10 @@ _external_url: "{{ gateway.external_url | default('https://' ~ ansible_operator_
 # Defined here rather than in deploy_gateway because role defaults are scoped
 # to their own role, and register_services needs them too.
 _gw_nginx_port: 8446
+# The front door as reached from inside the cluster: plain http to the
+# gateway's nginx, no TLS to validate. Every component's resource-server
+# and JWT settings point here rather than at external_url.
+_gw_internal_url: "http://{{ ansible_operator_meta.name }}-gateway.{{ ansible_operator_meta.namespace }}.svc:{{ _gw_nginx_port }}"
 _gw_uwsgi_port: 8052
 _gw_grpc_port: 50051
 _envoy_https_port: 8443

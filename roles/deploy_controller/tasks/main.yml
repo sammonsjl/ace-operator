@@ -1,0 +1,76 @@
+---
+# The controller, deployed directly rather than through awx-operator. The
+# resources here are the ones awx-operator used to render from an AWX CR:
+# settings, a redis sidecar on a unix socket, web and task Deployments, the
+# migration Job, and the RBAC the task pod needs to launch container-group
+# jobs as pods.
+
+- name: Create the controller's Django secret key, only if it does not exist
+  block:
+    - name: Look for an existing secret key
+      kubernetes.core.k8s_info:
+        kind: Secret
+        namespace: "{{ _namespace }}"
+        name: "{{ _name }}-controller-secret-key"
+      register: _ctl_key
+
+    # Regenerating this invalidates every stored credential in the database,
+    # because AWX encrypts them with it. Create-once is deliberate here, in a
+    # way it was not for the gateway's certificate.
+    - name: Generate one
+      kubernetes.core.k8s:
+        state: present
+        definition:
+          apiVersion: v1
+          kind: Secret
+          metadata:
+            name: "{{ _name }}-controller-secret-key"
+            namespace: "{{ _namespace }}"
+            labels: "{{ _labels }}"
+          stringData:
+            secret_key: "{{ lookup('password', '/dev/null length=64 chars=ascii_letters,digits') }}"
+      when: _ctl_key.resources | length == 0
+      no_log: true
+
+- name: Render the controller's configuration
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ item }}"
+  loop:
+    - "{{ lookup('template', 'configmaps.yaml.j2') | from_yaml }}"
+    - "{{ lookup('template', 'settings.yaml.j2') | from_yaml }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"
+
+- name: Render the controller's RBAC and Service
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ item }}"
+  loop: "{{ lookup('template', 'rbac.yaml.j2') | from_yaml_all | list }}"
+  loop_control:
+    label: "{{ item.kind }}/{{ item.metadata.name }}"
+
+- name: Run the database migrations
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ lookup('template', 'migration.yaml.j2') | from_yaml }}"
+
+- name: Wait for the migrations to finish
+  kubernetes.core.k8s_info:
+    kind: Job
+    namespace: "{{ _namespace }}"
+    name: "{{ _name }}-controller-migration-{{ _controller_image | regex_replace('^.*:', '') }}"
+  register: _ctl_migration
+  until: (_ctl_migration.resources[0].status.succeeded | default(0)) | int > 0
+  retries: 60
+  delay: 10
+
+- name: Deploy the controller
+  kubernetes.core.k8s:
+    state: present
+    definition: "{{ item }}"
+  loop:
+    - "{{ lookup('template', 'web.yaml.j2') | from_yaml }}"
+    - "{{ lookup('template', 'task.yaml.j2') | from_yaml }}"
+  loop_control:
+    label: "{{ item.metadata.name }}"

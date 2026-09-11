@@ -48,3 +48,19 @@ rules:
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "patch"]
+  # ACE deploys the components itself now, so it creates the resources their
+  # operators used to: the migration Job, and the ServiceAccount/Role/
+  # RoleBinding the task pod needs to launch container-group jobs as pods.
+  - apiGroups:
+    - batch
+    resources:
+    - jobs
+    verbs:
+    - '*'
+  - apiGroups:
+    - rbac.authorization.k8s.io
+    resources:
+    - roles
+    - rolebindings
+    verbs:
+    - '*'

@@ -1,16 +1,16 @@
 ---
-# Render one CR per enabled component and let that component's own operator
-# reconcile it. This is the shape the vendor's operator uses, and the reason
-# ace-operator stays small: awx-operator is the largest and most battle-tested
-# piece of this stack, and forking it would be the wrong trade.
+# ACE deploys its own components. It used to render one custom resource per
+# component and hand off to awx-operator, galaxy-operator and
+# eda-server-operator; those three are gone, and with them the requirement to
+# install three more operators before ACE could run at all.
 #
-# Requires these operators installed in the cluster:
-#   awx-operator (Apache-2.0), eda-server-operator, galaxy-operator (GPLv2+).
-# We create their custom resources — ordinary API use. We copy none of their
-# code, which for the GPLv2+ ones would conflict with this repo's Apache-2.0.
+# Owning the Deployments also means every image is one we build. The old path
+# left quay.io/ansible/awx-ee in the task pod as the receptor sidecar, because
+# that choice belonged to awx-operator rather than to us.
 
 - name: Deploy the controller
-  ansible.builtin.include_tasks: controller.yml
+  ansible.builtin.include_role:
+    name: deploy_controller
   when: controller.enabled | default(true)
 
 - name: Deploy the hub

@@ -1,5 +1,0 @@
----
-- name: Render the AWX CR
-  kubernetes.core.k8s:
-    state: present
-    definition: "{{ lookup('template', 'awx.yaml.j2') | from_yaml }}"

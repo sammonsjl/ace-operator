@@ -1,0 +1,42 @@
+{% import '_common.j2' as c with context %}
+---
+# Migrations run once per image version, in their own Job, rather than in the
+# task pod's startup. Two task replicas both migrating the same database is
+# how you get a half-applied schema.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ _name }}-controller-migration-{{ _controller_image | regex_replace('^.*:', '') }}
+  namespace: {{ _namespace }}
+  labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(4, True) }}
+spec:
+  backoffLimit: 6
+  template:
+    metadata:
+      labels:
+{{ _labels | to_nice_yaml(indent=2) | indent(8, True) }}
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ _name }}-controller
+      containers:
+        - name: migration
+          image: {{ _controller_image }}
+          imagePullPolicy: {{ image_pull_policy | default('Always') }}
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              awx-manage migrate --noinput
+              # create_preload_data is what puts the Default organization and
+              # the demo objects in place; it is safe to re-run.
+              awx-manage create_preload_data
+              awx-manage register_default_execution_environments
+          env:
+{{ c.db_env() }}
+          volumeMounts:
+{{ c.app_mounts() }}
+          resources:
+            requests: {cpu: 100m, memory: 512Mi}
+      volumes:
+{{ c.volumes() }}
