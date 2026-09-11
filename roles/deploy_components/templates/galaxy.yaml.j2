@@ -34,10 +34,22 @@ spec:
     replicas: {{ hub.replicas | default(1) }}
 
   # ace-hub forces django-ansible-base to the ref the gateway builds against,
-  # so the JWT dialect matches. Nothing to configure here — but if hub starts
-  # rejecting gateway tokens with a missing-claim error, that pin is the place
-  # to look, not this CR.
-  resource_server:
-    url: {{ gateway.external_url | default('https://' ~ _name ~ '-gateway') }}
-    secret_key_secret: {{ _name }}-hub-service-secret
-    validate_https: false
+  # so the JWT dialect matches. If hub starts rejecting gateway tokens with a
+  # missing-claim error, that pin is the place to look, not this CR.
+  #
+  # There is no resource_server field on this CRD -- unlike AWX and EDA, the
+  # only way in is pulp_settings, whose keys are upper-cased into settings.py.
+  # An earlier resource_server: block here was accepted by kubectl and then
+  # dropped on the floor, which is why the hub trusted no gateway JWT at all
+  # and post_install died with 401 Authentication credentials were not
+  # provided on /api/galaxy/service-index/metadata/.
+  #
+  # The renderer is `value | to_json` for anything that is not a bare True or
+  # False, so a nested boolean would emit JSON's `false` into a Python file.
+  # Pointing at the gateway's internal http Service sidesteps that: there is no
+  # TLS on 8446, so there is no VALIDATE_HTTPS to set.
+  pulp_settings:
+    ansible_base_jwt_key: "http://{{ _name }}-gateway.{{ _namespace }}.svc:{{ _gw_nginx_port }}"
+    resource_server:
+      URL: "http://{{ _name }}-gateway.{{ _namespace }}.svc:{{ _gw_nginx_port }}"
+      SECRET_KEY: "{{ _service_secret_map['hub'] }}"
