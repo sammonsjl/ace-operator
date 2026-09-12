@@ -116,28 +116,35 @@ data:
     # The filter turns that into a 400 and the console prints the raised text
     # as the page error.
     #
-    # So this applies AWX's own table on the one path that skips it. No new
+    # This applies AWX's own table on the one path that skips it. No new
     # policy: the mapping is upstream's. Unmapped names pass through, so
     # modern codenames like 'view' behave exactly as before.
     #
-    # Patched on ansible_base.rbac.validators rather than on the model or on
-    # ansible_base.rbac.evaluations, and that indirection is the whole trick:
+    # Installed on the first request rather than here, because none of the
+    # obvious earlier hooks survive contact:
     #
-    #   - the model is wrong, because DAB attaches access_ids_qs at app-ready,
-    #     well after settings load and after class_prepared;
-    #   - evaluations is wrong, because importing it here raises
-    #     AppRegistryNotReady;
-    #   - validators imports cleanly now, and evaluations has not been
-    #     imported yet, so its later `from ... import validate_codename_for_model`
-    #     binds the patched function. The descriptor looks the name up in the
-    #     evaluations namespace at call time, so that is all it takes.
-    def _ace_translate_legacy_org_roles():
-        from ansible_base.rbac import validators
+    #   - Organization.access_ids_qs does not exist yet at class_prepared;
+    #     DAB adds it at app-ready via connect_rbac_methods.
+    #   - importing ansible_base.rbac.evaluations at settings-load time
+    #     raises AppRegistryNotReady.
+    #   - importing ansible_base.rbac.validators at settings-load time reads
+    #     ANSIBLE_BASE_ORGANIZATION_MODEL, which this very file is still in
+    #     the middle of defining.
+    #
+    # By the first request all three are settled. The receiver disconnects
+    # itself once it has run, so there is no per-request cost after that, and
+    # the patched name is what AccessibleIdsDescriptor looks up at call time.
+    from django.core.signals import request_started as _ace_request_started
+
+    def _ace_translate_legacy_org_roles(sender, **kwargs):
+        _ace_request_started.disconnect(dispatch_uid='ace-legacy-org-roles')
+
+        from ansible_base.rbac import evaluations
         from awx.main.constants import org_role_to_permission
 
-        if getattr(validators, '_ace_patched', False):
+        if getattr(evaluations, '_ace_legacy_org_roles', False):
             return
-        _upstream_validate = validators.validate_codename_for_model
+        _upstream_validate = evaluations.validate_codename_for_model
 
         def validate_codename_for_model(codename, model):
             meta = getattr(model, '_meta', None)
@@ -145,11 +152,10 @@ data:
                 codename = org_role_to_permission.get(codename, codename)
             return _upstream_validate(codename, model)
 
-        validators.validate_codename_for_model = validate_codename_for_model
-        validators._ace_patched = True
+        evaluations.validate_codename_for_model = validate_codename_for_model
+        evaluations._ace_legacy_org_roles = True
 
-    _ace_translate_legacy_org_roles()
-    del _ace_translate_legacy_org_roles
+    _ace_request_started.connect(_ace_translate_legacy_org_roles, dispatch_uid='ace-legacy-org-roles', weak=False)
 {% for s in controller.extra_settings | default([]) %}
     {{ s.setting }} = {{ s.value }}
 {% endfor %}
