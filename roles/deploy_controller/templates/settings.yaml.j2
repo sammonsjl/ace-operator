@@ -54,6 +54,53 @@ data:
 
     # Jobs run as pods in this cluster, in our own execution environment.
     AWX_CONTAINER_GROUP_DEFAULT_IMAGE = '{{ _ee_image }}'
+
+    # ---- Subscription state, completed for an open licence.
+    #
+    # AWX picks OpenLicense when the product is AWX, and OpenLicense.validate()
+    # returns four keys: license_type, valid_key, subscription_name,
+    # product_name. That predates the platform console, which reads the same
+    # dict and branches on `compliant`:
+    #
+    #     compliant ? (time_remaining < 15 days ? "expires in N days" : ok)
+    #               : "Your subscription is out of compliance."
+    #
+    # A missing key is falsy, so an open AWX lands in the else and the console
+    # shows a permanent red out-of-compliance banner. Nothing is actually out
+    # of compliance -- there is no subscription to be out of compliance with --
+    # so the fix is to answer the question the console is asking rather than to
+    # hide its banner: an open licence is compliant and does not expire.
+    #
+    # Patched here rather than in the image so it stays visible and revertible,
+    # and because the licensing module imports cleanly at settings-load time
+    # (its only Django import is the lazy settings proxy).
+    def _ace_complete_open_license():
+        from awx.main.utils.licensing import OpenLicense
+
+        if getattr(OpenLicense, '_ace_patched', False):
+            return
+        _upstream_validate = OpenLicense.validate
+        # Far enough out that the console's 15-day warning never fires, and
+        # obviously synthetic to anyone who reads it.
+        _forever = 100 * 365 * 24 * 60 * 60
+
+        def validate(self):
+            attrs = _upstream_validate(self)
+            attrs.update(
+                compliant=True,
+                date_expired=False,
+                date_warning=False,
+                time_remaining=_forever,
+                grace_period_remaining=_forever,
+                trial=False,
+            )
+            return attrs
+
+        OpenLicense.validate = validate
+        OpenLicense._ace_patched = True
+
+    _ace_complete_open_license()
+    del _ace_complete_open_license
 {% for s in controller.extra_settings | default([]) %}
     {{ s.setting }} = {{ s.value }}
 {% endfor %}

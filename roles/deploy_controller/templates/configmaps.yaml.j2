@@ -52,7 +52,18 @@ data:
         listen {{ _ctl_web_port }} default_server;
         client_max_body_size 5m;
         location /static/ { alias /var/lib/awx/public/static/; }
-        location /websocket {
+        # Two paths reach the same consumer, and both have to go to daphne.
+        #
+        # /websocket/ is what a direct client uses. But the console reaches
+        # this pod through the gateway, which forwards the path unchanged, so
+        # its live-update socket arrives as /api/controller/v2/websocket/ --
+        # the prefixed route AWX's ASGI router registers when
+        # OPTIONAL_API_URLPATTERN_PREFIX is set, which it is, just below in
+        # settings.py. Only daphne serves it. Falling through to `location /`
+        # hands it to uwsgi, where Django's WSGI urlconf has no such route and
+        # answers 404 -- and the console then retries it every few seconds for
+        # as long as the page is open.
+        location ~ ^/(websocket|api/[^/]+/v[0-9]+/websocket)/ {
           proxy_pass http://127.0.0.1:8051;
           proxy_http_version 1.1;
           proxy_set_header Upgrade $http_upgrade;
