@@ -104,45 +104,52 @@ data:
 
     # ---- Legacy organization role names on the ?role_level= filter.
     #
-    # The console still asks questions like
+    # The console decides which tabs to render by asking questions like
     #   GET /api/controller/v2/organizations/?role_level=notification_admin_role
-    # to decide which tabs to show. Those are pre-DAB role names. AWX kept a
-    # compatibility table for exactly this -- awx.main.constants
-    # .org_role_to_permission maps notification_admin_role to
-    # add_notificationtemplate, and eight more besides -- but only the
-    # serializer and the Role shim consult it. The ?role_level= filter goes
-    # straight to Organization.access_ids_qs, which hands the name to DAB, and
-    # DAB raises "The permission notification_admin_role is not valid for
-    # model organization". The filter turns that into a 400, and the console
-    # surfaces the raised text as the page error.
+    # Those are pre-DAB role names. AWX kept a compatibility table for exactly
+    # this -- awx.main.constants.org_role_to_permission maps
+    # notification_admin_role to add_notificationtemplate, and eight more
+    # besides -- but only the serializer and the Role shim consult it. The
+    # ?role_level= filter calls Organization.access_ids_qs, which hands the
+    # name straight to DAB, and DAB raises
+    #   The permission notification_admin_role is not valid for model organization
+    # The filter turns that into a 400 and the console prints the raised text
+    # as the page error.
     #
-    # So this applies AWX's own table on the one path that skips it. It is not
-    # new policy: the mapping, and the intent behind it, are upstream's.
+    # So this applies AWX's own table on the one path that skips it. No new
+    # policy: the mapping is upstream's. Unmapped names pass through, so
+    # modern codenames like 'view' behave exactly as before.
     #
-    # Deferred to class_prepared because the patch needs the model class, and
-    # nothing under awx.main.models can be imported while settings are still
-    # being built.
-    from django.db.models.signals import class_prepared as _ace_class_prepared
-
-    def _ace_translate_legacy_org_roles(sender, **kwargs):
-        if sender.__name__ != 'Organization' or sender._meta.app_label != 'main':
-            return
-        if getattr(sender, '_ace_role_level_patched', False):
-            return
-
+    # Patched on ansible_base.rbac.validators rather than on the model or on
+    # ansible_base.rbac.evaluations, and that indirection is the whole trick:
+    #
+    #   - the model is wrong, because DAB attaches access_ids_qs at app-ready,
+    #     well after settings load and after class_prepared;
+    #   - evaluations is wrong, because importing it here raises
+    #     AppRegistryNotReady;
+    #   - validators imports cleanly now, and evaluations has not been
+    #     imported yet, so its later `from ... import validate_codename_for_model`
+    #     binds the patched function. The descriptor looks the name up in the
+    #     evaluations namespace at call time, so that is all it takes.
+    def _ace_translate_legacy_org_roles():
+        from ansible_base.rbac import validators
         from awx.main.constants import org_role_to_permission
 
-        _upstream_access_ids_qs = sender.access_ids_qs
+        if getattr(validators, '_ace_patched', False):
+            return
+        _upstream_validate = validators.validate_codename_for_model
 
-        def access_ids_qs(cls, actor, codename='view', **kwargs):
-            # Unmapped names pass through untouched, so modern codenames like
-            # 'view' and 'change_organization' behave exactly as before.
-            return _upstream_access_ids_qs(actor, org_role_to_permission.get(codename, codename), **kwargs)
+        def validate_codename_for_model(codename, model):
+            meta = getattr(model, '_meta', None)
+            if getattr(meta, 'model_name', None) == 'organization':
+                codename = org_role_to_permission.get(codename, codename)
+            return _upstream_validate(codename, model)
 
-        sender.access_ids_qs = classmethod(access_ids_qs)
-        sender._ace_role_level_patched = True
+        validators.validate_codename_for_model = validate_codename_for_model
+        validators._ace_patched = True
 
-    _ace_class_prepared.connect(_ace_translate_legacy_org_roles, dispatch_uid='ace-legacy-org-roles')
+    _ace_translate_legacy_org_roles()
+    del _ace_translate_legacy_org_roles
 {% for s in controller.extra_settings | default([]) %}
     {{ s.setting }} = {{ s.value }}
 {% endfor %}
