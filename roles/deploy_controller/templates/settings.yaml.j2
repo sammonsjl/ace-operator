@@ -101,6 +101,48 @@ data:
 
     _ace_complete_open_license()
     del _ace_complete_open_license
+
+    # ---- Legacy organization role names on the ?role_level= filter.
+    #
+    # The console still asks questions like
+    #   GET /api/controller/v2/organizations/?role_level=notification_admin_role
+    # to decide which tabs to show. Those are pre-DAB role names. AWX kept a
+    # compatibility table for exactly this -- awx.main.constants
+    # .org_role_to_permission maps notification_admin_role to
+    # add_notificationtemplate, and eight more besides -- but only the
+    # serializer and the Role shim consult it. The ?role_level= filter goes
+    # straight to Organization.access_ids_qs, which hands the name to DAB, and
+    # DAB raises "The permission notification_admin_role is not valid for
+    # model organization". The filter turns that into a 400, and the console
+    # surfaces the raised text as the page error.
+    #
+    # So this applies AWX's own table on the one path that skips it. It is not
+    # new policy: the mapping, and the intent behind it, are upstream's.
+    #
+    # Deferred to class_prepared because the patch needs the model class, and
+    # nothing under awx.main.models can be imported while settings are still
+    # being built.
+    from django.db.models.signals import class_prepared as _ace_class_prepared
+
+    def _ace_translate_legacy_org_roles(sender, **kwargs):
+        if sender.__name__ != 'Organization' or sender._meta.app_label != 'main':
+            return
+        if getattr(sender, '_ace_role_level_patched', False):
+            return
+
+        from awx.main.constants import org_role_to_permission
+
+        _upstream_access_ids_qs = sender.access_ids_qs
+
+        def access_ids_qs(cls, actor, codename='view', **kwargs):
+            # Unmapped names pass through untouched, so modern codenames like
+            # 'view' and 'change_organization' behave exactly as before.
+            return _upstream_access_ids_qs(actor, org_role_to_permission.get(codename, codename), **kwargs)
+
+        sender.access_ids_qs = classmethod(access_ids_qs)
+        sender._ace_role_level_patched = True
+
+    _ace_class_prepared.connect(_ace_translate_legacy_org_roles, dispatch_uid='ace-legacy-org-roles')
 {% for s in controller.extra_settings | default([]) %}
     {{ s.setting }} = {{ s.value }}
 {% endfor %}
